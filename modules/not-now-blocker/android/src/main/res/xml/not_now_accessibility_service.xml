@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Configuration for FallowAccessibilityService, referenced from the
+  Configuration for NotNowAccessibilityService, referenced from the
   <meta-data> tag in this module's AndroidManifest.xml.
 
   accessibilityEventTypes — which events the system delivers to
@@ -10,7 +10,7 @@
     window updates — needed for website blocking, because navigating within
     a browser never changes windows. It fires very frequently, so the
     service ignores it for every package except known browsers (see
-    BROWSER_URL_BARS in FallowAccessibilityService.kt).
+    BROWSER_URL_BARS in NotNowAccessibilityService.kt).
     NOTE: some in-app navigation (e.g. swiping into a Reels-style pager)
     also only emits typeWindowContentChanged; if a *screen* rule never
     triggers, the fix is to also run the screen-rule handler on
@@ -57,4 +57,4 @@
   android:accessibilityFlags="flagDefault|flagReportViewIds|flagIncludeNotImportantViews"
   android:canRetrieveWindowContent="true"
   android:notificationTimeout="100"
-  android:description="@string/fallow_accessibility_service_description" />
+  android:description="@string/not_now_accessibility_service_description" />

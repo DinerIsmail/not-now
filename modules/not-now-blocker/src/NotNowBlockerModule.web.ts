@@ -2,7 +2,7 @@ import { registerWebModule, NativeModule } from 'expo';
 
 // Web stub so the app still type-checks and renders in a browser.
 // Screen blocking is meaningless on web.
-class FallowBlockerModule extends NativeModule<{}> {
+class NotNowBlockerModule extends NativeModule<{}> {
   isAccessibilityServiceEnabled(): boolean {
     return false;
   }
@@ -21,4 +21,4 @@ class FallowBlockerModule extends NativeModule<{}> {
   }
 }
 
-export default registerWebModule(FallowBlockerModule, 'FallowBlocker');
+export default registerWebModule(NotNowBlockerModule, 'NotNowBlocker');

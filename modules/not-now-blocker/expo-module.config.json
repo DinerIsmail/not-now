@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["NotNowBlockerModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.notnowblocker.NotNowBlockerModule"]
+  }
+}

@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import { normalizeDomain } from './modules/fallow-blocker';
+import { normalizeDomain } from './modules/not-now-blocker';
 
 type Props = {
   websites: string[];

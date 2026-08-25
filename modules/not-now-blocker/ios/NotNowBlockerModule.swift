@@ -23,9 +23,9 @@ import ExpoModulesCore
 //
 // It also requires the "Family Controls" capability/entitlement on the app
 // target, which needs approval from Apple for distribution builds.
-public class FallowBlockerModule: Module {
+public class NotNowBlockerModule: Module {
   public func definition() -> ModuleDefinition {
-    Name("FallowBlocker")
+    Name("NotNowBlocker")
 
     Function("isAccessibilityServiceEnabled") { () -> Bool in
       return false

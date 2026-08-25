@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-  <!-- Shown in Settings → Accessibility as the service's name. -->
-  <string name="fallow_accessibility_service_label">Fallow screen blocker</string>
-  <!-- Shown on the service's detail page in accessibility settings. -->
-  <string name="fallow_accessibility_service_description">Watches for blocklisted screens inside other apps and backs out of them automatically. Configured only from within the Fallow app; no data leaves the device.</string>
-</resources>

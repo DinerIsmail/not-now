@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Shown in Settings → Accessibility as the service's name. -->
+  <string name="not_now_accessibility_service_label">Not Now screen blocker</string>
+  <!-- Shown on the service's detail page in accessibility settings. -->
+  <string name="not_now_accessibility_service_description">Watches for blocklisted screens inside other apps and backs out of them automatically. Configured only from within the Not Now app; no data leaves the device.</string>
+</resources>

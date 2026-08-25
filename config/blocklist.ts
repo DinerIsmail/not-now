@@ -1,13 +1,13 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════
- *  FALLOW BLOCKLIST — this file is the single source of truth.
+ *  NOT NOW BLOCKLIST — this file is the single source of truth.
  *
  *  Edit the entries below, then reload/relaunch the app once: App.tsx
  *  pushes this list to the native side on launch, and the accessibility
  *  service picks the change up immediately. No native rebuild needed.
  * ═══════════════════════════════════════════════════════════════════════
  */
-import type { BlockRule } from '../modules/fallow-blocker';
+import type { BlockRule } from '../modules/not-now-blocker';
 
 export const BLOCKLIST: BlockRule[] = [
   {

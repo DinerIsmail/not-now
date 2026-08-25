@@ -1,15 +1,15 @@
 /**
- * Public, platform-neutral API of the fallow-blocker module.
+ * Public, platform-neutral API of the not-now-blocker module.
  * App code should import from here and nowhere deeper.
  *
- * Android: implemented by FallowBlockerModule.kt + FallowAccessibilityService.kt.
- * iOS: currently a stub (see ios/FallowBlockerModule.swift). A future
+ * Android: implemented by NotNowBlockerModule.kt + NotNowAccessibilityService.kt.
+ * iOS: currently a stub (see ios/NotNowBlockerModule.swift). A future
  *      FamilyControls implementation slots in behind these same functions.
  */
-import FallowBlockerModule from './src/FallowBlockerModule';
-import type { BlockRule, InstalledApp } from './src/FallowBlocker.types';
+import NotNowBlockerModule from './src/NotNowBlockerModule';
+import type { BlockRule, InstalledApp } from './src/NotNowBlocker.types';
 
-export type { BlockRule, AndroidBlockRule, InstalledApp } from './src/FallowBlocker.types';
+export type { BlockRule, AndroidBlockRule, InstalledApp } from './src/NotNowBlocker.types';
 
 /**
  * Whether the blocking service is currently active.
@@ -17,7 +17,7 @@ export type { BlockRule, AndroidBlockRule, InstalledApp } from './src/FallowBloc
  * iOS (future): is Screen Time authorization granted?
  */
 export function isAccessibilityServiceEnabled(): boolean {
-  return FallowBlockerModule.isAccessibilityServiceEnabled();
+  return NotNowBlockerModule.isAccessibilityServiceEnabled();
 }
 
 /**
@@ -26,7 +26,7 @@ export function isAccessibilityServiceEnabled(): boolean {
  * iOS (future): the FamilyControls authorization prompt.
  */
 export function openAccessibilitySettings(): void {
-  FallowBlockerModule.openAccessibilitySettings();
+  NotNowBlockerModule.openAccessibilitySettings();
 }
 
 /**
@@ -36,17 +36,17 @@ export function openAccessibilitySettings(): void {
  * JS runtime attached — reads them.
  */
 export function setBlocklist(rules: BlockRule[]): void {
-  FallowBlockerModule.setBlocklist(JSON.stringify(rules));
+  NotNowBlockerModule.setBlocklist(JSON.stringify(rules));
 }
 
 /**
- * Launchable apps on the device, sorted by label, excluding Fallow itself.
+ * Launchable apps on the device, sorted by label, excluding Not Now itself.
  * Android: PackageManager behind a launcher-intent <queries> declaration.
  * iOS (future): not applicable — FamilyActivityPicker is a system-provided
  * picker, so iOS never needs to enumerate apps in JS.
  */
 export function getInstalledApps(): Promise<InstalledApp[]> {
-  return FallowBlockerModule.getInstalledApps();
+  return NotNowBlockerModule.getInstalledApps();
 }
 
 /**
@@ -56,11 +56,11 @@ export function getInstalledApps(): Promise<InstalledApp[]> {
  * two are edited from different places and never overwrite each other.
  */
 export function getBlockedApps(): string[] {
-  return FallowBlockerModule.getBlockedApps();
+  return NotNowBlockerModule.getBlockedApps();
 }
 
 export function setBlockedApps(packageNames: string[]): void {
-  FallowBlockerModule.setBlockedApps(packageNames);
+  NotNowBlockerModule.setBlockedApps(packageNames);
 }
 
 /**
@@ -71,11 +71,11 @@ export function setBlockedApps(packageNames: string[]): void {
  * (ManagedSettingsStore.shield.webDomains).
  */
 export function getBlockedWebsites(): string[] {
-  return FallowBlockerModule.getBlockedWebsites();
+  return NotNowBlockerModule.getBlockedWebsites();
 }
 
 export function setBlockedWebsites(domains: string[]): void {
-  FallowBlockerModule.setBlockedWebsites(domains);
+  NotNowBlockerModule.setBlockedWebsites(domains);
 }
 
 /**

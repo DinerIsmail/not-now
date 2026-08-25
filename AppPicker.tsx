@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 
-import { getInstalledApps, type InstalledApp } from './modules/fallow-blocker';
+import { getInstalledApps, type InstalledApp } from './modules/not-now-blocker';
 
 type Props = {
   blocked: string[];

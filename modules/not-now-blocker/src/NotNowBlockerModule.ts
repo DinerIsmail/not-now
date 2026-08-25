@@ -1,8 +1,8 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import type { InstalledApp } from './FallowBlocker.types';
+import type { InstalledApp } from './NotNowBlocker.types';
 
-declare class FallowBlockerModule extends NativeModule<{}> {
+declare class NotNowBlockerModule extends NativeModule<{}> {
   isAccessibilityServiceEnabled(): boolean;
   openAccessibilitySettings(): void;
   /** Takes the blocklist as a JSON string — see index.ts for the typed wrapper. */
@@ -14,4 +14,4 @@ declare class FallowBlockerModule extends NativeModule<{}> {
   getBlockedWebsites(): string[];
 }
 
-export default requireNativeModule<FallowBlockerModule>('FallowBlocker');
+export default requireNativeModule<NotNowBlockerModule>('NotNowBlocker');

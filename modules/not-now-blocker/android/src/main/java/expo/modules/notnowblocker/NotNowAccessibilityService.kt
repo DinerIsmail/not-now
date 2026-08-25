@@ -1,4 +1,4 @@
-package expo.modules.fallowblocker
+package expo.modules.notnowblocker
 
 import android.accessibilityservice.AccessibilityService
 import android.content.SharedPreferences
@@ -12,13 +12,13 @@ import android.view.accessibility.AccessibilityNodeInfo
  * no way to observe or act on another app's UI. Its declaration lives in
  * this module's AndroidManifest.xml; its behaviour (which events we get,
  * whether view IDs are reported) is configured in
- * res/xml/fallow_accessibility_service.xml.
+ * res/xml/not_now_accessibility_service.xml.
  *
  * Flow: window changes anywhere on the device → onAccessibilityEvent →
  * package name matches a rule? → does the window contain one of the rule's
  * view IDs / content descriptions? → global Back.
  */
-class FallowAccessibilityService : AccessibilityService() {
+class NotNowAccessibilityService : AccessibilityService() {
 
   private var rules: List<BlockRule> = emptyList()
   private var blockedApps: Set<String> = emptySet()
@@ -205,7 +205,7 @@ class FallowAccessibilityService : AccessibilityService() {
   }
 
   private companion object {
-    const val TAG = "FallowBlocker"
+    const val TAG = "NotNowBlocker"
     const val MAX_SEARCH_DEPTH = 25
     const val WEBSITE_BACK_COOLDOWN_MS = 1000L
 

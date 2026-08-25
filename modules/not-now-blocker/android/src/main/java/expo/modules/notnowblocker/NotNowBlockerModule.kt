@@ -1,4 +1,4 @@
-package expo.modules.fallowblocker
+package expo.modules.notnowblocker
 
 import android.content.ComponentName
 import android.content.Context
@@ -11,22 +11,22 @@ import expo.modules.kotlin.modules.ModuleDefinition
 
 /**
  * The JS-facing Expo module. Everything in this file is Android-specific;
- * the iOS counterpart lives in ios/FallowBlockerModule.swift and must expose
- * the same three functions (see modules/fallow-blocker/index.ts).
+ * the iOS counterpart lives in ios/NotNowBlockerModule.swift and must expose
+ * the same three functions (see modules/not-now-blocker/index.ts).
  */
-class FallowBlockerModule : Module() {
+class NotNowBlockerModule : Module() {
   private val context: Context
     get() = appContext.reactContext ?: throw Exceptions.ReactContextLost()
 
   override fun definition() = ModuleDefinition {
-    Name("FallowBlocker")
+    Name("NotNowBlocker")
 
     // True iff our AccessibilityService is listed in the system's
     // enabled-services setting. There is no API to enable it
     // programmatically — the user must flip the toggle themselves,
     // which is why openAccessibilitySettings exists.
     Function("isAccessibilityServiceEnabled") {
-      val expected = ComponentName(context, FallowAccessibilityService::class.java)
+      val expected = ComponentName(context, NotNowAccessibilityService::class.java)
       val enabled = Settings.Secure.getString(
         context.contentResolver,
         Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
@@ -88,7 +88,7 @@ class FallowBlockerModule : Module() {
       pm.queryIntentActivities(launcherIntent, PackageManager.MATCH_ALL)
         .map { it.activityInfo.applicationInfo }
         .distinctBy { it.packageName }
-        // Never list ourselves: blocking Fallow with Fallow would lock the
+        // Never list ourselves: blocking Not Now with Not Now would lock the
         // user out of their own escape hatch.
         .filter { it.packageName != context.packageName }
         .map {

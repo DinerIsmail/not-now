@@ -17,7 +17,7 @@ import {
   setBlockedApps,
   setBlockedWebsites,
   setBlocklist,
-} from './modules/fallow-blocker';
+} from './modules/not-now-blocker';
 import { BLOCKLIST } from './config/blocklist';
 import AppPicker from './AppPicker';
 import WebsiteList from './WebsiteList';
@@ -104,7 +104,7 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Fallow</Text>
+      <Text style={styles.title}>Not Now</Text>
 
       <View style={[styles.statusPill, enabled ? styles.statusOn : styles.statusOff]}>
         <Text style={styles.statusText}>
@@ -118,7 +118,7 @@ export default function App() {
             `${blocked.length} app${blocked.length === 1 ? '' : 's'} and ` +
             `${websites.length} website${websites.length === 1 ? '' : 's'} blocked.`
           : Platform.OS === 'android'
-            ? 'Enable the "Fallow screen blocker" accessibility service to start blocking.'
+            ? 'Enable the "Not Now screen blocker" accessibility service to start blocking.'
             : 'Blocking is only implemented on Android so far.'}
       </Text>
 

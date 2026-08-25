@@ -1,9 +1,0 @@
-{
-  "platforms": ["apple", "android", "web"],
-  "apple": {
-    "modules": ["FallowBlockerModule"]
-  },
-  "android": {
-    "modules": ["expo.modules.fallowblocker.FallowBlockerModule"]
-  }
-}

@@ -1,4 +1,4 @@
-# Fallow
+# Not Now
 
 Personal-use app that blocks specific **screens inside apps** (not whole apps).
 Android-first via an AccessibilityService; structured so an iOS Screen Time
@@ -13,7 +13,7 @@ written in Kotlin via the Expo Modules API.
 ```
 App.tsx                        The single status screen
 config/blocklist.ts            ← THE file you edit: the blocklist (typed)
-modules/fallow-blocker/
+modules/not-now-blocker/
   index.ts                     Public JS API (platform-neutral)
   src/                         Types + native module bindings
   android/                     Kotlin implementation (module, service,
@@ -31,12 +31,12 @@ npx expo run:android    # builds the dev client and installs it on a
 
 Subsequent JS-only changes hot-reload through `npx expo start`. Rebuild with
 `npx expo run:android` only when you touch anything under
-`modules/fallow-blocker/android/`.
+`modules/not-now-blocker/android/`.
 
 Then, on the device:
 
 1. Open the app → tap **Open accessibility settings**.
-2. Find **Fallow screen blocker** → toggle it on (Android shows a warning
+2. Find **Not Now screen blocker** → toggle it on (Android shows a warning
    that the service can read screen content — that's inherent to how this
    works; nothing leaves the device).
 3. Return to the app; the status pill flips to "Blocking is active".
@@ -72,9 +72,9 @@ Two implementation notes:
 - Listing other packages on Android 11+ requires a `<queries>` declaration
   (see the module's `AndroidManifest.xml`). We declare the launcher intent,
   which reveals exactly the apps with a home-screen icon — deliberately
-  narrower than the `QUERY_ALL_PACKAGES` permission. Fallow itself is
+  narrower than the `QUERY_ALL_PACKAGES` permission. Not Now itself is
   excluded from the list so you can't lock yourself out of the app you'd
-  need to undo it (the service also refuses to act on Fallow's own package
+  need to undo it (the service also refuses to act on Not Now's own package
   as a second line of defence).
 
 ## Blocking websites
@@ -87,7 +87,7 @@ bar and pressing Back when a blocked domain appears.
 How it works, and its limits:
 
 - Supported browsers are a hardcoded map of package name → URL-bar view ID
-  (`BROWSER_URL_BARS` in `FallowAccessibilityService.kt`): Chrome, Chrome
+  (`BROWSER_URL_BARS` in `NotNowAccessibilityService.kt`): Chrome, Chrome
   Beta, Brave, Firefox, Samsung Internet. Add your browser by finding its
   URL bar's view ID (section below) and extending the map (needs a rebuild).
 - This required widening the service to `typeWindowContentChanged` events,
@@ -145,26 +145,26 @@ Add the ID to `config/blocklist.ts`, reload the app, open the target screen.
 It should immediately back out. Watch the service's logs while testing:
 
 ```sh
-adb logcat -s FallowBlocker
+adb logcat -s NotNowBlocker
 ```
 
 If nothing fires, the screen may not emit a window *state* change (some
 in-app navigation only emits *content* changes) — see the `eventTypes`
 comment in
-`modules/fallow-blocker/android/src/main/res/xml/fallow_accessibility_service.xml`.
+`modules/not-now-blocker/android/src/main/res/xml/not_now_accessibility_service.xml`.
 
 ## What's Android-specific vs. where iOS slots in
 
 **Cross-platform (stays as-is):**
-`App.tsx`, `config/blocklist.ts`, and `modules/fallow-blocker/index.ts` — the
+`App.tsx`, `config/blocklist.ts`, and `modules/not-now-blocker/index.ts` — the
 public API (`isAccessibilityServiceEnabled`, `openAccessibilitySettings`,
 `setBlocklist`) is deliberately platform-neutral.
 
-**Android-specific (everything under `modules/fallow-blocker/android/`):**
+**Android-specific (everything under `modules/not-now-blocker/android/`):**
 the Expo module, the AccessibilityService, the SharedPreferences handoff, the
 manifest service declaration, and the accessibility XML config.
 
-**iOS (future) — `modules/fallow-blocker/ios/FallowBlockerModule.swift`:**
+**iOS (future) — `modules/not-now-blocker/ios/NotNowBlockerModule.swift`:**
 currently a stub returning `false`/no-ops so the app runs on iOS unchanged.
 The real implementation would use the Screen Time stack — FamilyControls for
 authorization, ManagedSettings for shielding, DeviceActivity for scheduling —

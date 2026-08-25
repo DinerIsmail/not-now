@@ -1,4 +1,4 @@
-package expo.modules.fallowblocker
+package expo.modules.notnowblocker
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -22,11 +22,11 @@ data class BlockRule(
  * runtime attached).
  */
 object BlocklistStore {
-  const val PREFS_NAME = "fallow_blocker"
+  const val PREFS_NAME = "not_now_blocker"
   const val KEY_RULES = "blocklist_json"
   const val KEY_BLOCKED_APPS = "blocked_apps_json"
   const val KEY_BLOCKED_WEBSITES = "blocked_websites_json"
-  private const val TAG = "FallowBlocker"
+  private const val TAG = "NotNowBlocker"
 
   fun prefs(context: Context): SharedPreferences =
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -82,7 +82,7 @@ object BlocklistStore {
     }
   }
 
-  // Expects the BlockRule[] shape defined in src/FallowBlocker.types.ts.
+  // Expects the BlockRule[] shape defined in src/NotNowBlocker.types.ts.
   private fun parse(json: String): List<BlockRule> {
     val rules = mutableListOf<BlockRule>()
     val array = JSONArray(json)

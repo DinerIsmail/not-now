@@ -1,0 +1,62 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!--
+    This is a library manifest: at build time it is merged into the app's
+    final AndroidManifest.xml, so the service declared here ends up declared
+    by the app without the app project needing to know about it.
+  -->
+  <!--
+    Android 11+ package visibility: without this, PackageManager hides other
+    installed packages from us and the app picker would come back nearly
+    empty. Declaring the launcher intent grants visibility of exactly the
+    apps that have a home-screen icon — no more (deliberately narrower than
+    the QUERY_ALL_PACKAGES permission).
+  -->
+  <queries>
+    <intent>
+      <action android:name="android.intent.action.MAIN" />
+      <category android:name="android.intent.category.LAUNCHER" />
+    </intent>
+  </queries>
+
+  <application>
+    <!--
+      android:name — fully qualified class of the service. Written out in
+        full (not ".FallowAccessibilityService") because relative names in a
+        merged library manifest are easy to get wrong.
+
+      android:permission — BIND_ACCESSIBILITY_SERVICE means only the system
+        (which holds that permission) may bind to this service. Required for
+        accessibility services since Android 4.1; without it the service is
+        ignored and, worse, any app could bind to it.
+
+      android:exported — accessibility services must be reachable by the
+        system, but "exported" here governs other apps. false + the BIND
+        permission above is the standard, safe combination.
+
+      android:label — the name shown in Settings → Accessibility. A string
+        resource so it is translatable and shows up properly in settings.
+    -->
+    <service
+      android:name="expo.modules.fallowblocker.FallowAccessibilityService"
+      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+      android:exported="false"
+      android:label="@string/fallow_accessibility_service_label">
+      <!--
+        This intent filter is how the system discovers that the service is
+        an accessibility service at all — it is what makes it appear in the
+        Settings → Accessibility list.
+      -->
+      <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+      </intent-filter>
+      <!--
+        Points the system at the XML file describing what the service wants:
+        which event types, which flags, whether it may read window content.
+        See res/xml/fallow_accessibility_service.xml.
+      -->
+      <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/fallow_accessibility_service" />
+    </service>
+  </application>
+</manifest>

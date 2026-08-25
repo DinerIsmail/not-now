@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuration for FallowAccessibilityService, referenced from the
+  <meta-data> tag in this module's AndroidManifest.xml.
+
+  accessibilityEventTypes — which events the system delivers to
+    onAccessibilityEvent. typeWindowStateChanged fires when the foreground
+    window/activity changes and drives app/screen blocking.
+    typeWindowContentChanged fires whenever anything inside the current
+    window updates — needed for website blocking, because navigating within
+    a browser never changes windows. It fires very frequently, so the
+    service ignores it for every package except known browsers (see
+    BROWSER_URL_BARS in FallowAccessibilityService.kt).
+    NOTE: some in-app navigation (e.g. swiping into a Reels-style pager)
+    also only emits typeWindowContentChanged; if a *screen* rule never
+    triggers, the fix is to also run the screen-rule handler on
+    content-changed events for that package — see onAccessibilityEvent.
+
+  accessibilityFeedbackType — how the service claims to assist the user;
+    used by the system to group services in settings. feedbackGeneric is
+    the catch-all for services that don't provide spoken/haptic/etc.
+    feedback.
+
+  accessibilityFlags —
+    flagDefault: baseline behaviour.
+    flagReportViewIds: without this, viewIdResourceName is null on every
+      node and findAccessibilityNodeInfosByViewId finds nothing — the
+      entire viewIds half of the blocklist depends on this flag.
+    flagIncludeNotImportantViews: also report views marked "not important
+      for accessibility". Container views (pagers, layouts) — exactly the
+      kind of view that identifies a screen — are often in that category.
+
+  canRetrieveWindowContent — grants access to the window's node tree
+    (rootInActiveWindow). Without it we could see events but never inspect
+    what is on screen. This is the attribute that makes Android show the
+    scary "can read screen content" warning when enabling the service —
+    accurate, and exactly why this app is personal-use.
+
+  notificationTimeout — minimum interval (ms) between events of the same
+    type delivered to us. 100ms coalesces event bursts during transitions
+    without letting a blocked screen linger.
+
+  description — shown to the user in the accessibility settings detail
+    page for this service. Must be a string resource, not a literal.
+
+  settingsActivity is omitted: the service has no configuration screen of
+  its own (the blocklist lives in config/blocklist.ts).
+
+  packageNames is omitted deliberately: setting it would filter events to a
+  hardcoded package list at the system level, but our blocklist is dynamic
+  (SharedPreferences), so we receive events from all packages and filter in
+  onAccessibilityEvent instead.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+  android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+  android:accessibilityFeedbackType="feedbackGeneric"
+  android:accessibilityFlags="flagDefault|flagReportViewIds|flagIncludeNotImportantViews"
+  android:canRetrieveWindowContent="true"
+  android:notificationTimeout="100"
+  android:description="@string/fallow_accessibility_service_description" />

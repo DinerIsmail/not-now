@@ -1,0 +1,7 @@
+expo.modules.fallowblocker.fallow-blocker-pngs-0 /Users/diner/Development/fallow/modules/fallow-blocker/android/build/generated/res/pngs/release
+expo.modules.fallowblocker.fallow-blocker-resValues-1 /Users/diner/Development/fallow/modules/fallow-blocker/android/build/generated/res/resValues/release
+expo.modules.fallowblocker.fallow-blocker-mergeReleaseResources-2 /Users/diner/Development/fallow/modules/fallow-blocker/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
+expo.modules.fallowblocker.fallow-blocker-mergeReleaseResources-3 /Users/diner/Development/fallow/modules/fallow-blocker/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
+expo.modules.fallowblocker.fallow-blocker-release-4 /Users/diner/Development/fallow/modules/fallow-blocker/android/build/intermediates/merged_res/release/mergeReleaseResources
+expo.modules.fallowblocker.fallow-blocker-main-5 /Users/diner/Development/fallow/modules/fallow-blocker/android/src/main/res
+expo.modules.fallowblocker.fallow-blocker-release-6 /Users/diner/Development/fallow/modules/fallow-blocker/android/src/release/res

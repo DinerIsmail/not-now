@@ -1,0 +1,48 @@
+{
+    "logs": [
+        {
+            "outputFile": "expo.modules.fallowblocker.fallow-blocker-release-3:/values/values.xml",
+            "map": [
+                {
+                    "source": "/Users/diner/Development/fallow/modules/fallow-blocker/android/src/main/res/values/strings.xml",
+                    "from": {
+                        "startLines": "5,3",
+                        "startColumns": "2,2",
+                        "startOffsets": "277,121",
+                        "endColumns": "224,82",
+                        "endOffsets": "499,201"
+                    },
+                    "to": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,282",
+                        "endColumns": "226,84",
+                        "endOffsets": "277,362"
+                    }
+                }
+            ]
+        },
+        {
+            "outputFile": "expo.modules.fallowblocker.fallow-blocker-mergeReleaseResources-1:/values/values.xml",
+            "map": [
+                {
+                    "source": "/Users/diner/Development/fallow/modules/fallow-blocker/android/src/main/res/values/strings.xml",
+                    "from": {
+                        "startLines": "5,3",
+                        "startColumns": "2,2",
+                        "startOffsets": "277,121",
+                        "endColumns": "224,82",
+                        "endOffsets": "499,201"
+                    },
+                    "to": {
+                        "startLines": "2,3",
+                        "startColumns": "4,4",
+                        "startOffsets": "55,282",
+                        "endColumns": "226,84",
+                        "endOffsets": "277,362"
+                    }
+                }
+            ]
+        }
+    ]
+}

@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="fallow_accessibility_service_description">Watches for blocklisted screens inside other apps and backs out of them automatically. Configured only from within the Fallow app; no data leaves the device.</string>
-    <string name="fallow_accessibility_service_label">Fallow screen blocker</string>
-</resources>

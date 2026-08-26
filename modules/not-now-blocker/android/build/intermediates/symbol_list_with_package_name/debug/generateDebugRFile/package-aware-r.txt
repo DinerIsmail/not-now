@@ -1,4 +1,0 @@
-expo.modules.fallowblocker
-string fallow_accessibility_service_description
-string fallow_accessibility_service_label
-xml fallow_accessibility_service

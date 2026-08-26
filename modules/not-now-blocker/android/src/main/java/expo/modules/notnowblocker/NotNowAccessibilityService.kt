@@ -2,6 +2,7 @@ package expo.modules.notnowblocker
 
 import android.accessibilityservice.AccessibilityService
 import android.content.SharedPreferences
+import android.graphics.Rect
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -29,6 +30,18 @@ class NotNowAccessibilityService : AccessibilityService() {
   // page would trigger a volley of Back presses that then eats the pages
   // *behind* it too.
   private var lastWebsiteBackAt = 0L
+
+  // Screen rules are edge-triggered, and this is load-bearing. A blocked
+  // screen's view IDs stay in the window tree for as long as that screen is
+  // up, so matching on mere presence re-fired on every subsequent event in
+  // the same app: opening Instagram's comments or share sheet raises a
+  // window-state change, the Reels pager is still sitting behind the sheet,
+  // it matches again, and Back closes the sheet the user just opened.
+  // Remembering what we already acted on turns "is a blocked screen
+  // present?" into "did the user just arrive at one?".
+  private var matchedScreen: String? = null
+  private var lastScreenEvalAt = 0L
+  private var lastScreenBackAt = 0L
 
   // Re-read whenever JS saves a change (blocklist edits apply on the next
   // app launch, picker changes immediately) without the user having to
@@ -81,17 +94,23 @@ class NotNowAccessibilityService : AccessibilityService() {
       AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
         if (handleBlockedApp(packageName)) return
         if (handleBlockedWebsite(packageName)) return
-        handleScreenRules(packageName)
+        handleScreenRules(packageName, throttled = false)
       }
       // Content changed inside the current window. Navigating within a
       // browser never changes windows, so this is the only signal that the
-      // URL changed. Fires very frequently — bail out immediately for
-      // anything that isn't a known browser, and don't run the app/screen
-      // handlers here to keep their semantics (and cost) unchanged.
+      // URL changed. Fires very frequently, so both handlers below bail
+      // cheaply: the website one on the browser lookup, the screen one on
+      // "this package has no rules" before it ever touches the window tree.
       AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
         if (BROWSER_URL_BARS.containsKey(packageName)) {
           handleBlockedWebsite(packageName)
         }
+        // Screen rules need this event too. Swiping into a Reels-style pager
+        // changes no window, so a state-change-only handler never sees the
+        // user arrive — it only woke up later, when a sheet or dialog raised
+        // a window-state change, which is precisely how it ended up closing
+        // those instead of blocking the reel.
+        handleScreenRules(packageName, throttled = true)
       }
     }
   }
@@ -136,21 +155,45 @@ class NotNowAccessibilityService : AccessibilityService() {
     return true
   }
 
-  private fun handleScreenRules(packageName: String) {
+  private fun handleScreenRules(packageName: String, throttled: Boolean) {
     val matching = rules.filter { it.packageName == packageName }
-    if (matching.isEmpty()) return
+    if (matching.isEmpty()) {
+      // No rules here, so the user has left any blocked screen behind:
+      // clear the latch so coming back to one counts as a fresh arrival.
+      matchedScreen = null
+      return
+    }
+
+    // Content-changed events arrive in bursts. Evaluating every one would
+    // walk the window tree far more often than the UI actually changes.
+    val now = SystemClock.uptimeMillis()
+    if (throttled && now - lastScreenEvalAt < SCREEN_EVAL_THROTTLE_MS) return
+    lastScreenEvalAt = now
 
     // rootInActiveWindow is the full window tree; event.source is often null
     // or just the changed subtree, so the root is the reliable place to look.
     val root = rootInActiveWindow ?: return
 
-    for (rule in matching) {
-      if (windowMatches(root, rule)) {
-        Log.i(TAG, "Blocked screen in $packageName, performing Back")
-        performGlobalAction(GLOBAL_ACTION_BACK)
-        return
-      }
+    val matchedOn = matching.asSequence()
+      .mapNotNull { windowMatches(root, it) }
+      .firstOrNull()
+
+    if (matchedOn == null) {
+      matchedScreen = null
+      return
     }
+
+    // Already acted on this arrival. The blocked view stays in the tree the
+    // whole time the screen is up, so without this every later event —
+    // including the one that opens a comments sheet — would fire Back again.
+    val key = "$packageName|$matchedOn"
+    if (key == matchedScreen) return
+    if (now - lastScreenBackAt < SCREEN_BACK_COOLDOWN_MS) return
+
+    matchedScreen = key
+    lastScreenBackAt = now
+    Log.i(TAG, "Blocked screen in $packageName (matched $matchedOn), performing Back")
+    performGlobalAction(GLOBAL_ACTION_BACK)
   }
 
   // Extracts a host from URL-bar text. Browsers usually hide the scheme
@@ -166,48 +209,83 @@ class NotNowAccessibilityService : AccessibilityService() {
       .takeIf { it.isNotEmpty() }
   }
 
+  /**
+   * Whether this node is actually in front of the user, rather than merely
+   * present in the window tree.
+   *
+   * This distinction is the whole ballgame for screen rules. Instagram keeps
+   * the Reels pager inflated inside MainTabActivity, so
+   * `clips_viewer_view_pager` resolves from the instant the app opens — on
+   * the feed, on a story, anywhere. Matching on existence alone therefore
+   * fired Back within half a second of launch, and because a freshly-opened
+   * app sits at its task root, Back exited Instagram entirely instead of
+   * backing out of a reel.
+   *
+   * A view parked in an unselected tab reports isVisibleToUser = false and
+   * usually collapses to empty bounds, so both checks together keep a rule
+   * scoped to the screen the user is really on.
+   */
+  private fun AccessibilityNodeInfo.isOnScreen(): Boolean {
+    if (!isVisibleToUser) return false
+    val bounds = Rect()
+    getBoundsInScreen(bounds)
+    return bounds.width() > 0 && bounds.height() > 0
+  }
+
   override fun onInterrupt() {
     // Called when the system wants feedback interrupted (e.g. speech).
     // We produce no ongoing feedback, so there is nothing to stop.
   }
 
-  private fun windowMatches(root: AccessibilityNodeInfo, rule: BlockRule): Boolean {
+  // Returns the view ID / description that matched, or null for no match.
+  // The specific token (rather than a bare Boolean) is what keys the
+  // edge-trigger latch in handleScreenRules, and it makes the log line say
+  // which half of a multi-part rule actually fired.
+  private fun windowMatches(root: AccessibilityNodeInfo, rule: BlockRule): String? {
     // View IDs first: the framework indexes these, so lookup is cheap and
     // doesn't require walking the tree ourselves.
     for (viewId in rule.viewIds) {
       val hits = root.findAccessibilityNodeInfosByViewId(viewId)
-      if (!hits.isNullOrEmpty()) return true
+      if (hits != null && hits.any { it.isOnScreen() }) return viewId
     }
     if (rule.contentDescriptions.isNotEmpty()) {
-      return treeContainsDescription(root, rule.contentDescriptions, depth = 0)
+      return findDescription(root, rule.contentDescriptions, depth = 0)
     }
-    return false
+    return null
   }
 
-  // Depth-first search for a matching contentDescription. Depth-capped:
-  // pathological trees (webviews, long feeds) can be thousands of nodes,
-  // and anything identifying a screen should be near the top anyway.
-  private fun treeContainsDescription(
+  // Depth-first search for a matching contentDescription, returning the
+  // needle that matched (not the node's full description, so the result is
+  // stable enough to use as a latch key). Depth-capped: pathological trees
+  // (webviews, long feeds) can be thousands of nodes, and anything
+  // identifying a screen should be near the top anyway.
+  private fun findDescription(
     node: AccessibilityNodeInfo,
     needles: List<String>,
     depth: Int,
-  ): Boolean {
-    if (depth > MAX_SEARCH_DEPTH) return false
+  ): String? {
+    if (depth > MAX_SEARCH_DEPTH) return null
     val description = node.contentDescription?.toString()
-    if (description != null && needles.any { description.contains(it, ignoreCase = true) }) {
-      return true
+    if (description != null && node.isOnScreen()) {
+      val hit = needles.firstOrNull { description.contains(it, ignoreCase = true) }
+      if (hit != null) return hit
     }
     for (i in 0 until node.childCount) {
       val child = node.getChild(i) ?: continue
-      if (treeContainsDescription(child, needles, depth + 1)) return true
+      findDescription(child, needles, depth + 1)?.let { return it }
     }
-    return false
+    return null
   }
 
   private companion object {
     const val TAG = "NotNowBlocker"
     const val MAX_SEARCH_DEPTH = 25
     const val WEBSITE_BACK_COOLDOWN_MS = 1000L
+
+    // Screen rules: how often content-changed events may trigger a tree
+    // walk, and a floor between Back presses as a backstop to the latch.
+    const val SCREEN_EVAL_THROTTLE_MS = 250L
+    const val SCREEN_BACK_COOLDOWN_MS = 1000L
 
     // Browsers we can watch: package name → the view ID of its URL bar.
     // To support another browser, find its URL bar's ID with the technique

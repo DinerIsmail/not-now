@@ -25,13 +25,12 @@ modules/not-now-blocker/
 
 ```sh
 npm install
-npx expo run:android    # builds the dev client and installs it on a
-                        # connected device/emulator, then starts Metro
+npm run android          # or: npm run android:device  (pick a physical device)
 ```
 
-Subsequent JS-only changes hot-reload through `npx expo start`. Rebuild with
-`npx expo run:android` only when you touch anything under
-`modules/not-now-blocker/android/`.
+That produces a **development build** — a debug APK with the `expo-dev-client`
+launcher and this project's Kotlin module compiled in — installs it, and starts
+Metro. This is a one-time cost per native change, not per edit.
 
 Then, on the device:
 
@@ -40,6 +39,53 @@ Then, on the device:
    that the service can read screen content — that's inherent to how this
    works; nothing leaves the device).
 3. Return to the app; the status pill flips to "Blocking is active".
+
+## Shipping updates while developing
+
+Almost everything you'll iterate on is JavaScript, and **JS changes need no
+rebuild and no reinstall**. Leave the dev build installed and re-serve the
+bundle:
+
+```sh
+npm run start            # phone on the same wifi as your machine
+npm run start:tunnel     # phone on any network (tunnels via ngrok)
+npm run start -- --clear # same, but bust the Metro cache
+```
+
+The dev launcher opens on app start: scan the QR code from the terminal, or
+tap the dev server if it's auto-detected on your network. After that, saving a
+file reloads the app. Shake the device (or the dev menu) to reload manually or
+switch servers — the launcher can point at a different dev server without
+recompiling.
+
+### What needs a new APK
+
+| Change | Then |
+|---|---|
+| `App.tsx`, `AppPicker.tsx`, `WebsiteList.tsx` | reload — no rebuild |
+| `config/blocklist.ts` | reload — see below |
+| `modules/not-now-blocker/index.ts`, `src/*.ts` | reload — no rebuild |
+| Anything under `modules/not-now-blocker/android/` | `npm run android` |
+| New dependency with native code, or an SDK bump | `npm run android` |
+| `app.json` native keys (package name, icons, permissions) | `npm run prebuild` then `npm run android` |
+
+Blocklist edits are the nice case: the JS reload pushes the new rules into
+`SharedPreferences` and the accessibility service picks them up live — no
+rebuild, and no re-toggling the service in settings.
+
+### Getting a build onto a phone that isn't tethered
+
+```sh
+cd android && ./gradlew assembleRelease     # → app/build/outputs/apk/release/
+npx expo run:android --binary path/to.apk   # install an APK you already built
+```
+
+Send that APK however you like (the `--binary` flag also saves you a rebuild
+when you just need to reinstall). If this ever outgrows manual sharing, the
+usual next steps are Firebase App Distribution or EAS Build internal
+distribution — both give testers a link and push notifications, at the cost of
+one more service to configure. Note that `android/` is generated and
+gitignored: regenerate it with `npm run prebuild` after changing native config.
 
 ## Editing the blocklist
 

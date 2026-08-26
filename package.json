@@ -15,7 +15,10 @@
   },
   "scripts": {
     "start": "expo start",
+    "start:tunnel": "expo start --tunnel",
     "android": "expo run:android",
+    "android:device": "expo run:android --device",
+    "prebuild": "expo prebuild --platform android",
     "ios": "expo run:ios",
     "web": "expo start --web"
   },

@@ -10,17 +10,27 @@
 import type { BlockRule } from '../modules/not-now-blocker';
 
 export const BLOCKLIST: BlockRule[] = [
-  {
-    label: 'Instagram Reels',
-    android: {
-      packageName: 'com.instagram.android',
-      // ⚠️ PLACEHOLDER — UNVERIFIED. This is a plausible guess at the Reels
-      // pager's view ID, not an inspected one. Instagram renames internals
-      // between releases. Verify against YOUR installed version using the
-      // "Finding view IDs" section of the README, and replace.
-      viewIds: ['com.instagram.android:id/clips_viewer_view_pager'],
-      // Optional fallback matching: uncomment and adjust after inspecting.
-      // contentDescriptions: ['Reels'],
-    },
-  },
+  // ⚠️ DISABLED — this rule was measured wrong, not just unverified.
+  //
+  // logcat on a Pixel 7a (2026-08-26) showed the service matching
+  // `clips_viewer_view_pager` within 0.25–0.5s of Instagram *launching*, on
+  // MainTabActivity — not on a reel. Instagram keeps the Reels pager
+  // inflated inside its main tab activity, so the ID resolves everywhere in
+  // the app: feed, stories, DMs. Back then fired at Instagram's task root,
+  // which exits the app rather than backing out of a screen.
+  //
+  // The service now additionally requires a matched node to be visible on
+  // screen, which neutralises this specific failure. Re-enable only with a
+  // view ID inspected on your own Instagram build (README → "Finding view
+  // IDs"), and confirm via `adb logcat -s NotNowBlocker` that it fires when
+  // you open a reel and stays quiet when you open the app.
+  //
+  // {
+  //   label: 'Instagram Reels',
+  //   android: {
+  //     packageName: 'com.instagram.android',
+  //     viewIds: ['com.instagram.android:id/<inspect this yourself>'],
+  //     // contentDescriptions: ['Reels'],
+  //   },
+  // },
 ];

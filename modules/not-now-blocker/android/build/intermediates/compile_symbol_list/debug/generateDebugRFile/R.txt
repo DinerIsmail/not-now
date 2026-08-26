@@ -1,3 +1,0 @@
-int string fallow_accessibility_service_description 0x0
-int string fallow_accessibility_service_label 0x0
-int xml fallow_accessibility_service 0x0

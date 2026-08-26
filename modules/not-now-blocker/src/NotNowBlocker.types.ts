@@ -39,4 +39,10 @@ export type InstalledApp = {
   label: string;
   /** e.g. "com.instagram.android". */
   packageName: string;
+  /**
+   * `file://` URI of the app's launcher icon, extracted to the cache dir by
+   * the native module. Optional: absent when icon extraction failed, and
+   * always absent on iOS/web, where apps can't be enumerated at all.
+   */
+  icon?: string;
 };

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -63,6 +64,17 @@ export default function AppPicker({ blocked, onToggle, onClose }: Props) {
             const isBlocked = blocked.includes(item.packageName);
             return (
               <Pressable style={styles.row} onPress={() => onToggle(item.packageName)}>
+                {item.icon ? (
+                  <Image source={{ uri: item.icon }} style={styles.icon} />
+                ) : (
+                  // Icon extraction can fail for an individual app, and iOS
+                  // never provides one. An initial keeps the rows aligned.
+                  <View style={[styles.icon, styles.iconFallback]}>
+                    <Text style={styles.iconFallbackText}>
+                      {item.label.trim().charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.rowText}>
                   <Text style={styles.label}>{item.label}</Text>
                   <Text style={styles.packageName}>{item.packageName}</Text>
@@ -115,8 +127,24 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
     paddingVertical: 10,
     paddingHorizontal: 16,
+  },
+  icon: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+  },
+  iconFallback: {
+    backgroundColor: '#eee',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconFallbackText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#888',
   },
   rowText: {
     flex: 1,

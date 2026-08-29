@@ -65,5 +65,20 @@ public class NotNowBlockerModule: Module {
     Function("getBlockedWebsites") { () -> [String] in
       return []
     }
+
+    Function("setSchedule") { (_ windowsJson: String) in
+      // No-op. This is the other piece that maps cleanly to iOS:
+      // DeviceActivitySchedule takes exactly this shape — a recurring
+      // wall-clock interval — and applies/lifts the ManagedSettings shield
+      // at its edges, so iOS would enforce the schedule natively rather
+      // than checking the clock on every event as Android does.
+      _ = windowsJson
+    }
+
+    Function("getSchedule") { () -> String in
+      // An empty array: no schedule, i.e. block around the clock — which
+      // for the stub means block nothing at all, around the clock.
+      return "[]"
+    }
   }
 }

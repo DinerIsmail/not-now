@@ -12,6 +12,9 @@ declare class NotNowBlockerModule extends NativeModule<{}> {
   getInstalledApps(): Promise<InstalledApp[]>;
   setBlockedWebsites(domains: string[]): void;
   getBlockedWebsites(): string[];
+  /** Takes the schedule as a JSON string — see index.ts for the typed wrapper. */
+  setSchedule(windowsJson: string): void;
+  getSchedule(): string;
 }
 
 export default requireNativeModule<NotNowBlockerModule>('NotNowBlocker');

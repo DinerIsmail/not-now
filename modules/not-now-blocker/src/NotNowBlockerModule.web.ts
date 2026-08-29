@@ -19,6 +19,10 @@ class NotNowBlockerModule extends NativeModule<{}> {
   getBlockedWebsites(): string[] {
     return [];
   }
+  setSchedule(_windowsJson: string): void {}
+  getSchedule(): string {
+    return '[]';
+  }
 }
 
 export default registerWebModule(NotNowBlockerModule, 'NotNowBlocker');

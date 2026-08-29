@@ -82,6 +82,20 @@ class NotNowBlockerModule : Module() {
       BlocklistStore.loadBlockedWebsites(context).toList()
     }
 
+    // The blocking schedule (already JSON-encoded by the JS wrapper). One
+    // global schedule gating all three block kinds; an empty array means
+    // block around the clock.
+    Function("setSchedule") { windowsJson: String ->
+      BlocklistStore.saveSchedule(context, windowsJson)
+    }
+
+    // Handed back as the raw JSON string it was stored as, and parsed in
+    // JS. The editor needs the exact windows the user typed, not the
+    // service's projection of them.
+    Function("getSchedule") {
+      BlocklistStore.loadScheduleJson(context)
+    }
+
     // Lists launchable apps — the ones with a launcher icon — which is what
     // a user thinks of as "installed apps". Visibility of other packages is
     // granted by the <queries> declaration in this module's manifest

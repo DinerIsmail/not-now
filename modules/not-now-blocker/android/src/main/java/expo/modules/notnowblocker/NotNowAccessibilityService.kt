@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import java.util.Calendar
 
 /**
  * The enforcement half of the module. Entirely Android-specific: iOS offers
@@ -16,14 +17,28 @@ import android.view.accessibility.AccessibilityNodeInfo
  * res/xml/not_now_accessibility_service.xml.
  *
  * Flow: window changes anywhere on the device → onAccessibilityEvent →
- * package name matches a rule? → does the window contain one of the rule's
- * view IDs / content descriptions? → global Back.
+ * is the schedule currently in a blocking window? → package name matches a
+ * rule? → does the window contain one of the rule's view IDs / content
+ * descriptions? → global Back.
  */
 class NotNowAccessibilityService : AccessibilityService() {
 
   private var rules: List<BlockRule> = emptyList()
   private var blockedApps: Set<String> = emptySet()
   private var blockedWebsites: Set<String> = emptySet()
+
+  // Windows during which blocking is enforced. Empty means "always",
+  // which is both the default and what a corrupt stored schedule falls
+  // back to — the service failing open is far less bad than it silently
+  // switching itself off.
+  private var schedule: List<ScheduleWindow> = emptyList()
+
+  // Answering "are we in a blocking window?" costs a Calendar allocation,
+  // and content-changed events arrive dozens per second in a browser. The
+  // answer only changes on a minute boundary, so caching it for a second
+  // is free accuracy-wise and removes the allocation from the hot path.
+  private var scheduleActive = true
+  private var scheduleCheckedAt = 0L
 
   // Last time we pressed Back for a blocked website. Content-changed events
   // arrive in bursts while a page loads; without a cooldown one blocked
@@ -60,6 +75,13 @@ class NotNowAccessibilityService : AccessibilityService() {
         blockedWebsites = BlocklistStore.loadBlockedWebsites(this)
         Log.i(TAG, "Blocked websites reloaded: ${blockedWebsites.size} domain(s)")
       }
+      BlocklistStore.KEY_SCHEDULE -> {
+        schedule = BlocklistStore.loadSchedule(this)
+        // Drop the cached answer too, or an edit made seconds ago wouldn't
+        // take effect until the cache expired.
+        scheduleCheckedAt = 0L
+        Log.i(TAG, "Schedule reloaded: ${schedule.size} window(s)")
+      }
     }
   }
 
@@ -68,11 +90,13 @@ class NotNowAccessibilityService : AccessibilityService() {
     rules = BlocklistStore.load(this)
     blockedApps = BlocklistStore.loadBlockedApps(this)
     blockedWebsites = BlocklistStore.loadBlockedWebsites(this)
+    schedule = BlocklistStore.loadSchedule(this)
     BlocklistStore.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
     Log.i(
       TAG,
       "Service connected, ${rules.size} rule(s), ${blockedApps.size} blocked app(s), " +
-        "${blockedWebsites.size} blocked website(s)"
+        "${blockedWebsites.size} blocked website(s), " +
+        if (schedule.isEmpty()) "no schedule (always on)" else "${schedule.size} schedule window(s)"
     )
   }
 
@@ -88,6 +112,17 @@ class NotNowAccessibilityService : AccessibilityService() {
     // says — otherwise a bad blocklist could lock the user out of the very
     // screen they need to fix it.
     if (packageName == this.packageName) return
+
+    // Outside the schedule the service is inert. Checked before anything
+    // else so an out-of-hours event costs a clock read and nothing more —
+    // no window-tree walks, no URL-bar lookups.
+    if (!blockingActiveNow()) {
+      // Clear the screen-rule latch so that when the schedule comes back
+      // round, sitting on a blocked screen still counts as a fresh arrival
+      // rather than one we've "already handled".
+      matchedScreen = null
+      return
+    }
 
     when (event.eventType) {
       // The foreground window/activity changed: run everything.
@@ -113,6 +148,40 @@ class NotNowAccessibilityService : AccessibilityService() {
         handleScreenRules(packageName, throttled = true)
       }
     }
+  }
+
+  /**
+   * Whether the current local time falls inside a blocking window.
+   *
+   * An empty schedule means always — both because that's the sensible
+   * default for a device that has never opened the schedule editor, and
+   * because it's what the app did before schedules existed, so existing
+   * installs behave identically until the user sets one.
+   */
+  private fun blockingActiveNow(): Boolean {
+    if (schedule.isEmpty()) return true
+    val now = SystemClock.uptimeMillis()
+    // The 0 check is what makes invalidation (scheduleCheckedAt = 0) work
+    // even in the first second of uptime, when the subtraction alone would
+    // still look fresh.
+    if (scheduleCheckedAt != 0L && now - scheduleCheckedAt < SCHEDULE_CACHE_MS) return scheduleActive
+    scheduleCheckedAt = now
+
+    // Calendar rather than a stored epoch offset: the schedule is a
+    // wall-clock rule, so it has to follow the device's timezone and DST
+    // changes, which only the calendar knows about.
+    val calendar = Calendar.getInstance()
+    // Calendar.SUNDAY is 1; JS Date#getDay makes Sunday 0. The stored days
+    // use the JS convention, so shift into it here.
+    val day = calendar.get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY
+    val minute = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+
+    val active = schedule.any { it.covers(day, minute) }
+    if (active != scheduleActive) {
+      Log.i(TAG, if (active) "Entered a blocking window" else "Left the blocking window")
+    }
+    scheduleActive = active
+    return active
   }
 
   // Whole-app blocks need no window inspection. Home, not Back: Back from
@@ -286,6 +355,12 @@ class NotNowAccessibilityService : AccessibilityService() {
     // walk, and a floor between Back presses as a backstop to the latch.
     const val SCREEN_EVAL_THROTTLE_MS = 250L
     const val SCREEN_BACK_COOLDOWN_MS = 1000L
+
+    // How long a schedule decision is reused before the clock is read
+    // again. Well under the minute at which the answer can actually
+    // change, so this bounds staleness at one second either side of a
+    // window's edge.
+    const val SCHEDULE_CACHE_MS = 1000L
 
     // Browsers we can watch: package name → the view ID of its URL bar.
     // To support another browser, find its URL bar's ID with the technique

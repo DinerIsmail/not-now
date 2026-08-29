@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getInstalledApps, type InstalledApp } from './modules/not-now-blocker';
 
@@ -23,6 +24,7 @@ type Props = {
  * toggles whole-app blocking for it. Selection state lives in App.tsx.
  */
 export default function AppPicker({ blocked, onToggle, onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const [apps, setApps] = useState<InstalledApp[] | null>(null);
   const [filter, setFilter] = useState('');
 
@@ -37,7 +39,7 @@ export default function AppPicker({ blocked, onToggle, onClose }: Props) {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Pressable onPress={onClose} hitSlop={12}>
           <Text style={styles.back}>‹ Back</Text>
@@ -60,6 +62,10 @@ export default function AppPicker({ blocked, onToggle, onClose }: Props) {
         <FlatList
           data={visible}
           keyExtractor={(app) => app.packageName}
+          // On the content rather than the container, so rows still scroll
+          // under the translucent navigation bar instead of stopping short
+          // of it — but the last row can always be scrolled clear of it.
+          contentContainerStyle={{ paddingBottom: insets.bottom }}
           renderItem={({ item }) => {
             const isBlocked = blocked.includes(item.packageName);
             return (
@@ -101,6 +107,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     paddingHorizontal: 16,
+    // The container supplies the status-bar inset; this is just breathing
+    // room below it.
+    paddingTop: 8,
     paddingBottom: 12,
   },
   back: {

@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { normalizeDomain } from './modules/not-now-blocker';
 
@@ -23,6 +24,7 @@ type Props = {
  * State lives in App.tsx.
  */
 export default function WebsiteList({ websites, onAdd, onRemove, onClose }: Props) {
+  const insets = useSafeAreaInsets();
   const [input, setInput] = useState('');
   const [invalid, setInvalid] = useState(false);
 
@@ -38,7 +40,7 @@ export default function WebsiteList({ websites, onAdd, onRemove, onClose }: Prop
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Pressable onPress={onClose} hitSlop={12}>
           <Text style={styles.back}>‹ Back</Text>
@@ -75,6 +77,7 @@ export default function WebsiteList({ websites, onAdd, onRemove, onClose }: Prop
       <FlatList
         data={websites}
         keyExtractor={(domain) => domain}
+        contentContainerStyle={{ paddingBottom: insets.bottom }}
         renderItem={({ item }) => (
           <View style={styles.row}>
             <Text style={styles.domain}>{item}</Text>
@@ -99,6 +102,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     paddingHorizontal: 16,
+    // The container supplies the status-bar inset; this is just breathing
+    // room below it.
+    paddingTop: 8,
     paddingBottom: 12,
   },
   back: {

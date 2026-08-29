@@ -46,3 +46,36 @@ export type InstalledApp = {
    */
   icon?: string;
 };
+
+/**
+ * One window of time during which blocking is enforced.
+ *
+ * The schedule is global: it gates *all* three kinds of block (screen
+ * rules, whole apps, websites) rather than being attached to any one of
+ * them. An empty schedule means "always on", which is what the app did
+ * before schedules existed.
+ *
+ * Deliberately stored as plain numbers rather than Date/ISO strings: a
+ * schedule is a recurring wall-clock rule, not an instant. Dates would
+ * carry a timezone and a calendar day that are meaningless here and would
+ * drift across DST.
+ */
+export type ScheduleWindow = {
+  /** Stable key for list rendering and removal. */
+  id: string;
+  /**
+   * Days the window starts on, as JS `Date#getDay` numbers:
+   * 0 = Sunday … 6 = Saturday. A window that wraps past midnight is
+   * anchored to its *start* day, so `days: [5]` with 22:00–02:00 means
+   * Friday night into Saturday morning.
+   */
+  days: number[];
+  /** Start, in minutes from local midnight (0–1439). 9am = 540. */
+  startMinute: number;
+  /**
+   * End, in minutes from local midnight (0–1439), exclusive. When this is
+   * less than or equal to `startMinute` the window wraps past midnight
+   * into the following day.
+   */
+  endMinute: number;
+};

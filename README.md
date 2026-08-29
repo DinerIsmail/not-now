@@ -12,6 +12,9 @@ written in Kotlin via the Expo Modules API.
 
 ```
 App.tsx                        The single status screen
+AppPicker.tsx                  Whole-app blocking picker
+WebsiteList.tsx                Blocked-domain list
+ScheduleEditor.tsx             When blocking applies
 config/blocklist.ts            ← THE file you edit: the blocklist (typed)
 modules/not-now-blocker/
   index.ts                     Public JS API (platform-neutral)
@@ -62,7 +65,7 @@ recompiling.
 
 | Change | Then |
 |---|---|
-| `App.tsx`, `AppPicker.tsx`, `WebsiteList.tsx` | reload — no rebuild |
+| `App.tsx`, `AppPicker.tsx`, `WebsiteList.tsx`, `ScheduleEditor.tsx` | reload — no rebuild |
 | `config/blocklist.ts` | reload — see below |
 | `modules/not-now-blocker/index.ts`, `src/*.ts` | reload — no rebuild |
 | Anything under `modules/not-now-blocker/android/` | `npm run android` |
@@ -86,6 +89,32 @@ usual next steps are Firebase App Distribution or EAS Build internal
 distribution — both give testers a link and push notifications, at the cost of
 one more service to configure. Note that `android/` is generated and
 gitignored: regenerate it with `npm run prebuild` after changing native config.
+
+## Layout: edge-to-edge and the keyboard
+
+Android has been edge-to-edge since Expo SDK 54 / RN 0.81 (targeting Android
+16) and **it cannot be turned off**. Every screen therefore draws underneath
+the status bar and underneath the navigation bar — and the 3-button
+navigation bar is tall enough to swallow a whole row of buttons. Two rules
+follow, and new screens have to keep to both:
+
+- Read insets from `useSafeAreaInsets()` (`react-native-safe-area-context`,
+  the package Expo points at for this). `SafeAreaProvider` is installed once,
+  at the root of `App.tsx`; each screen pads itself from there, because they
+  disagree about which edge matters. The home screen pads its *container*
+  top and bottom, since its buttons are the bottom-most thing on it. The list
+  screens pad the top of the container but put the bottom inset on the
+  `FlatList`'s `contentContainerStyle`, so rows still scroll under the
+  translucent navigation bar while the last row can always be scrolled clear
+  of it.
+- Keep text inputs in the **top half** of a screen. Edge-to-edge also means
+  the window no longer resizes for the software keyboard by itself, so a form
+  pinned to the bottom gets covered by the very keyboard it opened — which is
+  exactly what happened to the schedule editor's time fields. Its "Add a
+  window" form sits above the list for that reason, matching the add row in
+  `WebsiteList`. The alternative is `KeyboardAvoidingView` or
+  `react-native-keyboard-controller`; laying the screen out so the problem
+  can't arise is cheaper and has fewer edge cases.
 
 ## Editing the blocklist
 
@@ -146,6 +175,48 @@ How it works, and its limits:
   browsers not in the map, and anything DNS-level. This is a nudge, not a
   firewall.
 
+## Scheduling when blocking applies
+
+**Blocking schedule** on the main screen limits blocking to certain times.
+The schedule is **global**: it gates all three kinds of block (screen rules,
+whole apps, websites) rather than being attached to any one of them.
+
+A schedule is a list of *windows*, each a set of days plus a start and end
+time. Blocking is enforced whenever the current local time falls inside any
+window; with **no windows at all, blocking runs around the clock** — which is
+what the app did before schedules existed, so nothing changes until you set
+one. The main screen's status pill gains a third state, "Paused by
+schedule", and tells you when blocking next resumes.
+
+Reading the times:
+
+- 24-hour clock, typed as text (`9`, `930`, `9:30` and `09:30` all work).
+  A native time picker would mean a new native dependency, and so a rebuild,
+  to enter four digits.
+- An end **earlier than** the start runs overnight into the next morning:
+  `22:00 – 06:00` on Fridays is Friday night through Saturday morning. A
+  window is anchored to the day it *starts* on.
+- An end of `00:00` means midnight, so `09:00 – 00:00` covers a whole
+  evening.
+- Equal start and end times mean a full 24 hours on the selected days,
+  shown in the list as "All day".
+
+Two implementation notes:
+
+- The rule is evaluated in two places — `isWithinSchedule` in
+  `modules/not-now-blocker/index.ts` for the UI, and `ScheduleWindow.covers`
+  in `BlocklistStore.kt` for the service. The accessibility service has no JS
+  runtime attached, so it can't share the JS one. **Change one and you must
+  change the other.**
+- The service checks the schedule *first*, before any window inspection, so
+  an out-of-hours event costs a clock read and nothing more. The answer is
+  cached for a second, since content-changed events arrive dozens per second
+  in a browser but the answer only changes on a minute boundary. A schedule
+  edit invalidates that cache immediately.
+
+A schedule the service can't parse fails **open** — back to blocking around
+the clock — rather than silently switching the app off.
+
 ## Finding view IDs for a screen
 
 The blocklist needs the *resource ID* of a view that exists on the screen you
@@ -202,9 +273,12 @@ comment in
 ## What's Android-specific vs. where iOS slots in
 
 **Cross-platform (stays as-is):**
-`App.tsx`, `config/blocklist.ts`, and `modules/not-now-blocker/index.ts` — the
-public API (`isAccessibilityServiceEnabled`, `openAccessibilitySettings`,
-`setBlocklist`) is deliberately platform-neutral.
+`App.tsx`, the three editor screens, `config/blocklist.ts`, and
+`modules/not-now-blocker/index.ts` — the public API
+(`isAccessibilityServiceEnabled`, `openAccessibilitySettings`,
+`setBlocklist`, `getSchedule`/`setSchedule`, …) is deliberately
+platform-neutral. The schedule's evaluation helpers live there too, as plain
+functions over `ScheduleWindow[]` with no platform dependency.
 
 **Android-specific (everything under `modules/not-now-blocker/android/`):**
 the Expo module, the AccessibilityService, the SharedPreferences handoff, the
@@ -222,3 +296,8 @@ behind the same three functions. Two structural notes already accounted for:
 - The app target will need the Family Controls entitlement (Apple approval
   required for distribution) — an `app.json`/config-plugin concern, not a
   module rewrite.
+- The **schedule** is the piece that maps to iOS most cleanly:
+  `DeviceActivitySchedule` takes exactly this shape — a recurring wall-clock
+  interval — and applies and lifts the `ManagedSettings` shield at its
+  edges. iOS would enforce the schedule natively at the window boundaries
+  rather than consulting the clock on every event as Android does.

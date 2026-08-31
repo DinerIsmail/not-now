@@ -27,7 +27,11 @@ export type AndroidBlockRule = {
 };
 
 export type BlockRule = {
-  /** Human-readable name, only used for your own sanity. */
+  /**
+   * Human-readable name. Shown as the heading on the shield that covers a
+   * blocked screen, so write it for yourself-in-the-moment ("Instagram
+   * Reels"), not as an internal id.
+   */
   label: string;
   android?: AndroidBlockRule;
   // ios?: IosBlockRule;  // future: FamilyControls app/category tokens

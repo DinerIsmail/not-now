@@ -1,6 +1,7 @@
 package expo.modules.notnowblocker
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Rect
 import android.os.SystemClock
@@ -16,10 +17,24 @@ import java.util.Calendar
  * whether view IDs are reported) is configured in
  * res/xml/not_now_accessibility_service.xml.
  *
- * Flow: window changes anywhere on the device → onAccessibilityEvent →
- * is the schedule currently in a blocking window? → package name matches a
- * rule? → does the window contain one of the rule's view IDs / content
- * descriptions? → global Back.
+ * Flow: something changes on screen → onAccessibilityEvent → is the schedule
+ * in a blocking window? → is the foreground content blocked? → put a shield
+ * (BlockOverlay) over it, or take one down.
+ *
+ * The service *shields* rather than *ejects*. It used to fire Back or Home
+ * the instant it saw something blocked, which was both jarring and, in a
+ * browser, wrong: Back on a blocked page in a fresh tab has nowhere to go,
+ * so it closed the browser. Covering the content leaves the user where they
+ * are and makes leaving their decision — the shield carries the button that
+ * does it.
+ *
+ * That change also deleted a whole class of bug. Ejecting was destructive
+ * and could not be repeated, so it needed an edge-trigger latch and two
+ * cooldowns to avoid re-firing on every event while a blocked screen stayed
+ * in the tree — the mechanism that used to close the comments sheet a user
+ * had just opened over a blocked reel. Showing a shield is idempotent:
+ * re-showing the same one is a no-op, so the service can simply answer "is
+ * this blocked right now?" on every event and keep the overlay in step.
  */
 class NotNowAccessibilityService : AccessibilityService() {
 
@@ -40,23 +55,50 @@ class NotNowAccessibilityService : AccessibilityService() {
   private var scheduleActive = true
   private var scheduleCheckedAt = 0L
 
-  // Last time we pressed Back for a blocked website. Content-changed events
-  // arrive in bursts while a page loads; without a cooldown one blocked
-  // page would trigger a volley of Back presses that then eats the pages
-  // *behind* it too.
-  private var lastWebsiteBackAt = 0L
+  // Built lazily: constructing it resolves WINDOW_SERVICE, which wants a
+  // context that is actually ready, and a service that never blocks
+  // anything never needs one.
+  private val overlay by lazy { BlockOverlay(this) }
 
-  // Screen rules are edge-triggered, and this is load-bearing. A blocked
-  // screen's view IDs stay in the window tree for as long as that screen is
-  // up, so matching on mere presence re-fired on every subsequent event in
-  // the same app: opening Instagram's comments or share sheet raises a
-  // window-state change, the Reels pager is still sitting behind the sheet,
-  // it matches again, and Back closes the sheet the user just opened.
-  // Remembering what we already acted on turns "is a blocked screen
-  // present?" into "did the user just arrive at one?".
-  private var matchedScreen: String? = null
-  private var lastScreenEvalAt = 0L
-  private var lastScreenBackAt = 0L
+  /** Package the shield is currently covering, or null when it is down. */
+  private var shieldedPackage: String? = null
+
+  /**
+   * When evaluations first started saying "nothing blocked here" while the
+   * shield was up, or 0. See [applyBlock] — reading another app's UI is not
+   * perfectly reliable, and one bad read must not flicker the shield.
+   */
+  private var clearSince = 0L
+
+  private var lastEvalAt = 0L
+
+  /**
+   * Deadline until which no shield may go up, set when the user asks to
+   * leave. This is not an optimisation, it is the fix for a genuinely bad
+   * bug: leaving is not instant, and a browser's URL bar still reads the
+   * blocked domain for a few hundred milliseconds after Back is pressed.
+   * Without this the shield sprang straight back up mid-navigation, the
+   * user pressed "Go back" a second time, and *that* press — arriving when
+   * the tab had already rewound to a page with no history behind it — is
+   * what closed the browser outright.
+   */
+  private var suppressShieldUntil = 0L
+
+  // Package name → display name, for the shield's heading. Labels never
+  // change while the service is alive, and PackageManager lookups are not
+  // free, so they are worth keeping.
+  private val labelCache = mutableMapOf<String, String>()
+
+  /** Everything the shield needs to describe one piece of blocked content. */
+  private data class Block(
+    /** Identity, so re-showing the same shield is a no-op. */
+    val key: String,
+    val heading: String,
+    val detail: String,
+    val actionLabel: String,
+    /** What the shield's button does — the eject that is now opt-in. */
+    val globalAction: Int,
+  )
 
   // Re-read whenever JS saves a change (blocklist edits apply on the next
   // app launch, picker changes immediately) without the user having to
@@ -82,7 +124,12 @@ class NotNowAccessibilityService : AccessibilityService() {
         scheduleCheckedAt = 0L
         Log.i(TAG, "Schedule reloaded: ${schedule.size} window(s)")
       }
+      else -> return@OnSharedPreferenceChangeListener
     }
+    // Something the user just unblocked may be what the shield is covering.
+    // Drop it; the next event puts it back if it is still blocked, and in
+    // the meantime the user isn't staring at a shield they just removed.
+    clearShield()
   }
 
   override fun onServiceConnected() {
@@ -100,7 +147,15 @@ class NotNowAccessibilityService : AccessibilityService() {
     )
   }
 
+  override fun onUnbind(intent: Intent?): Boolean {
+    // The service is going away; a shield left on screen would have nothing
+    // left to take it down.
+    clearShield()
+    return super.onUnbind(intent)
+  }
+
   override fun onDestroy() {
+    clearShield()
     BlocklistStore.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
     super.onDestroy()
   }
@@ -110,44 +165,109 @@ class NotNowAccessibilityService : AccessibilityService() {
 
     // Belt-and-braces: never act on our own app, whatever the stored state
     // says — otherwise a bad blocklist could lock the user out of the very
-    // screen they need to fix it.
+    // screen they need to fix it. This also means the shield's own window
+    // can never cause the service to re-evaluate itself.
     if (packageName == this.packageName) return
 
     // Outside the schedule the service is inert. Checked before anything
     // else so an out-of-hours event costs a clock read and nothing more —
     // no window-tree walks, no URL-bar lookups.
     if (!blockingActiveNow()) {
-      // Clear the screen-rule latch so that when the schedule comes back
-      // round, sitting on a blocked screen still counts as a fresh arrival
-      // rather than one we've "already handled".
-      matchedScreen = null
+      clearShield()
       return
     }
 
-    when (event.eventType) {
-      // The foreground window/activity changed: run everything.
-      AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-        if (handleBlockedApp(packageName)) return
-        if (handleBlockedWebsite(packageName)) return
-        handleScreenRules(packageName, throttled = false)
-      }
+    // The user is on their way out; let the navigation finish before
+    // deciding anything. The shield is already down by this point.
+    if (SystemClock.uptimeMillis() < suppressShieldUntil) return
+
+    val windowChanged = when (event.eventType) {
+      // The foreground window/activity changed: a real navigation.
+      AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> true
       // Content changed inside the current window. Navigating within a
       // browser never changes windows, so this is the only signal that the
-      // URL changed. Fires very frequently, so both handlers below bail
-      // cheaply: the website one on the browser lookup, the screen one on
-      // "this package has no rules" before it ever touches the window tree.
-      AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-        if (BROWSER_URL_BARS.containsKey(packageName)) {
-          handleBlockedWebsite(packageName)
-        }
-        // Screen rules need this event too. Swiping into a Reels-style pager
-        // changes no window, so a state-change-only handler never sees the
-        // user arrive — it only woke up later, when a sheet or dialog raised
-        // a window-state change, which is precisely how it ended up closing
-        // those instead of blocking the reel.
-        handleScreenRules(packageName, throttled = true)
-      }
+      // URL changed, and some in-app navigation (swiping into a Reels-style
+      // pager) only shows up here too. It fires very frequently — hence the
+      // throttle below, and the cheap early exits in each check.
+      AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> false
+      else -> return
     }
+
+    if (!windowChanged) {
+      val now = SystemClock.uptimeMillis()
+      if (now - lastEvalAt < EVAL_THROTTLE_MS) return
+      lastEvalAt = now
+    }
+
+    applyBlock(packageName, evaluate(packageName), immediate = windowChanged)
+  }
+
+  /**
+   * What, if anything, is blocked about the foreground right now.
+   *
+   * Order matters only in that the cheapest checks come first. Each one
+   * exits before touching the window tree when it has nothing to say —
+   * a set lookup for apps, a browser-map lookup for websites, a rule filter
+   * for screens — which is what keeps this affordable on the flood of
+   * content-changed events.
+   */
+  private fun evaluate(packageName: String): Block? =
+    blockedApp(packageName)
+      ?: blockedWebsite(packageName)
+      ?: blockedScreen(packageName)
+
+  /**
+   * Puts the shield up or takes it down to match [block].
+   *
+   * The asymmetry is deliberate. Shielding happens immediately: being late
+   * is the one failure that matters. Un-shielding waits, because "I could
+   * not find the URL bar in this frame" and "the user has left" look
+   * identical from here, and a shield that flickers off and on over blocked
+   * content is worse than one that lingers a moment. The wait is skipped
+   * when the foreground app changed or a window-state event says the user
+   * genuinely navigated, so leaving never feels sticky.
+   */
+  private fun applyBlock(packageName: String, block: Block?, immediate: Boolean) {
+    if (block != null) {
+      clearSince = 0L
+      shieldedPackage = packageName
+      val shown = overlay.show(block.key, block.heading, block.detail, block.actionLabel) {
+        clearShield()
+        suppressShieldUntil = SystemClock.uptimeMillis() + LEAVE_SUPPRESS_MS
+        Log.i(TAG, "User left ${block.key}, holding off for ${LEAVE_SUPPRESS_MS}ms")
+        performGlobalAction(block.globalAction)
+      }
+      if (!shown) {
+        // The shield could not be put up. Rather than let blocked content
+        // through, fall back to the old behaviour of ejecting the user.
+        Log.w(TAG, "Shield unavailable for ${block.key}, falling back to eject")
+        shieldedPackage = null
+        performGlobalAction(block.globalAction)
+      }
+      return
+    }
+
+    if (!overlay.isShowing) return
+
+    if (immediate || packageName != shieldedPackage) {
+      clearShield()
+      return
+    }
+
+    val now = SystemClock.uptimeMillis()
+    if (clearSince == 0L) {
+      clearSince = now
+      return
+    }
+    if (now - clearSince < SHIELD_CLEAR_GRACE_MS) return
+    clearShield()
+  }
+
+  private fun clearShield() {
+    clearSince = 0L
+    shieldedPackage = null
+    // Cheap no-op when nothing is showing, which is the common case.
+    overlay.hide()
   }
 
   /**
@@ -184,85 +304,83 @@ class NotNowAccessibilityService : AccessibilityService() {
     return active
   }
 
-  // Whole-app blocks need no window inspection. Home, not Back: Back from
-  // inside an app just walks up its own screen stack, making the service
-  // fire again on every step.
-  private fun handleBlockedApp(packageName: String): Boolean {
-    if (!blockedApps.contains(packageName)) return false
-    Log.i(TAG, "Blocked app $packageName opened, performing Home")
-    performGlobalAction(GLOBAL_ACTION_HOME)
-    return true
+  // Whole-app blocks need no window inspection: being in the foreground at
+  // all is the whole rule. Home rather than Back is still the right escape
+  // here — Back from inside an app just walks up its own screen stack, so
+  // the user would meet the shield again on every step.
+  private fun blockedApp(packageName: String): Block? {
+    if (!blockedApps.contains(packageName)) return null
+    return Block(
+      key = "app:$packageName",
+      heading = appLabel(packageName),
+      detail = "This app is blocked.",
+      actionLabel = "Go home",
+      globalAction = GLOBAL_ACTION_HOME,
+    )
   }
 
-  // Reads the browser's URL bar and presses Back if its host matches a
-  // blocked domain (exact or subdomain). Back rather than Home: in a
-  // browser, Back is page-level — it returns to the previous page instead
-  // of throwing the user out of the whole browser.
-  private fun handleBlockedWebsite(packageName: String): Boolean {
-    if (blockedWebsites.isEmpty()) return false
-    val urlBarId = BROWSER_URL_BARS[packageName] ?: return false
-    val root = rootInActiveWindow ?: return false
-    val urlBar = root.findAccessibilityNodeInfosByViewId(urlBarId)?.firstOrNull() ?: return false
+  // Reads the browser's URL bar and shields if its host matches a blocked
+  // domain (exact or subdomain). Back rather than Home for the escape: in a
+  // browser, Back is page-level, so it returns to the previous page.
+  private fun blockedWebsite(packageName: String): Block? {
+    if (blockedWebsites.isEmpty()) return null
+    val urlBarId = BROWSER_URL_BARS[packageName] ?: return null
+    val root = rootInActiveWindow ?: return null
+    val urlBar = root.findAccessibilityNodeInfosByViewId(urlBarId)?.firstOrNull() ?: return null
 
     // A focused URL bar means the user is typing in it; the text is a
     // half-finished query, not a visited page. Acting on it would fight
     // the keyboard.
-    if (urlBar.isFocused) return false
+    if (urlBar.isFocused) return null
 
-    val host = hostOf(urlBar.text?.toString() ?: return false) ?: return false
-    val isBlocked = blockedWebsites.any { host == it || host.endsWith(".$it") }
-    if (!isBlocked) return false
+    val host = hostOf(urlBar.text?.toString() ?: return null) ?: return null
+    if (blockedWebsites.none { host == it || host.endsWith(".$it") }) return null
 
-    val now = SystemClock.uptimeMillis()
-    if (now - lastWebsiteBackAt >= WEBSITE_BACK_COOLDOWN_MS) {
-      lastWebsiteBackAt = now
-      Log.i(TAG, "Blocked website $host in $packageName, performing Back")
-      performGlobalAction(GLOBAL_ACTION_BACK)
-    }
-    // Still "handled" during the cooldown window — the page is blocked
-    // either way.
-    return true
+    return Block(
+      key = "web:$host",
+      heading = host,
+      detail = "This site is blocked.",
+      actionLabel = "Go back",
+      globalAction = GLOBAL_ACTION_BACK,
+    )
   }
 
-  private fun handleScreenRules(packageName: String, throttled: Boolean) {
+  private fun blockedScreen(packageName: String): Block? {
     val matching = rules.filter { it.packageName == packageName }
-    if (matching.isEmpty()) {
-      // No rules here, so the user has left any blocked screen behind:
-      // clear the latch so coming back to one counts as a fresh arrival.
-      matchedScreen = null
-      return
-    }
-
-    // Content-changed events arrive in bursts. Evaluating every one would
-    // walk the window tree far more often than the UI actually changes.
-    val now = SystemClock.uptimeMillis()
-    if (throttled && now - lastScreenEvalAt < SCREEN_EVAL_THROTTLE_MS) return
-    lastScreenEvalAt = now
+    if (matching.isEmpty()) return null
 
     // rootInActiveWindow is the full window tree; event.source is often null
     // or just the changed subtree, so the root is the reliable place to look.
-    val root = rootInActiveWindow ?: return
+    val root = rootInActiveWindow ?: return null
 
-    val matchedOn = matching.asSequence()
-      .mapNotNull { windowMatches(root, it) }
-      .firstOrNull()
+    val (rule, matchedOn) = matching.asSequence()
+      .mapNotNull { rule -> windowMatches(root, rule)?.let { rule to it } }
+      .firstOrNull() ?: return null
 
-    if (matchedOn == null) {
-      matchedScreen = null
-      return
+    return Block(
+      // The matched token is part of the key so that moving between two
+      // blocked screens in the same app rebuilds the shield rather than
+      // leaving the first one's heading up.
+      key = "screen:$packageName|$matchedOn",
+      heading = rule.label,
+      detail = "This screen is blocked.",
+      actionLabel = "Go back",
+      globalAction = GLOBAL_ACTION_BACK,
+    )
+  }
+
+  private fun appLabel(packageName: String): String = labelCache.getOrPut(packageName) {
+    try {
+      packageManager.getApplicationLabel(
+        packageManager.getApplicationInfo(packageName, 0)
+      ).toString()
+    } catch (e: Exception) {
+      // Visibility of other packages comes from the <queries> declaration in
+      // this module's manifest; anything outside it falls back to the raw
+      // package name, which is still recognisable enough on a shield.
+      Log.w(TAG, "No label for $packageName", e)
+      packageName
     }
-
-    // Already acted on this arrival. The blocked view stays in the tree the
-    // whole time the screen is up, so without this every later event —
-    // including the one that opens a comments sheet — would fire Back again.
-    val key = "$packageName|$matchedOn"
-    if (key == matchedScreen) return
-    if (now - lastScreenBackAt < SCREEN_BACK_COOLDOWN_MS) return
-
-    matchedScreen = key
-    lastScreenBackAt = now
-    Log.i(TAG, "Blocked screen in $packageName (matched $matchedOn), performing Back")
-    performGlobalAction(GLOBAL_ACTION_BACK)
   }
 
   // Extracts a host from URL-bar text. Browsers usually hide the scheme
@@ -286,9 +404,7 @@ class NotNowAccessibilityService : AccessibilityService() {
    * the Reels pager inflated inside MainTabActivity, so
    * `clips_viewer_view_pager` resolves from the instant the app opens — on
    * the feed, on a story, anywhere. Matching on existence alone therefore
-   * fired Back within half a second of launch, and because a freshly-opened
-   * app sits at its task root, Back exited Instagram entirely instead of
-   * backing out of a reel.
+   * shielded the whole app within half a second of launch.
    *
    * A view parked in an unselected tab reports isVisibleToUser = false and
    * usually collapses to empty bounds, so both checks together keep a rule
@@ -303,13 +419,14 @@ class NotNowAccessibilityService : AccessibilityService() {
 
   override fun onInterrupt() {
     // Called when the system wants feedback interrupted (e.g. speech).
-    // We produce no ongoing feedback, so there is nothing to stop.
+    // We produce no ongoing feedback, so there is nothing to stop. The
+    // shield is not "feedback" — tearing it down here would hand the user a
+    // way to dismiss it by triggering any talkback-style interruption.
   }
 
   // Returns the view ID / description that matched, or null for no match.
-  // The specific token (rather than a bare Boolean) is what keys the
-  // edge-trigger latch in handleScreenRules, and it makes the log line say
-  // which half of a multi-part rule actually fired.
+  // The specific token (rather than a bare Boolean) keys the shield, and it
+  // makes the log line say which half of a multi-part rule actually fired.
   private fun windowMatches(root: AccessibilityNodeInfo, rule: BlockRule): String? {
     // View IDs first: the framework indexes these, so lookup is cheap and
     // doesn't require walking the tree ourselves.
@@ -325,7 +442,7 @@ class NotNowAccessibilityService : AccessibilityService() {
 
   // Depth-first search for a matching contentDescription, returning the
   // needle that matched (not the node's full description, so the result is
-  // stable enough to use as a latch key). Depth-capped: pathological trees
+  // stable enough to use as a shield key). Depth-capped: pathological trees
   // (webviews, long feeds) can be thousands of nodes, and anything
   // identifying a screen should be near the top anyway.
   private fun findDescription(
@@ -349,12 +466,20 @@ class NotNowAccessibilityService : AccessibilityService() {
   private companion object {
     const val TAG = "NotNowBlocker"
     const val MAX_SEARCH_DEPTH = 25
-    const val WEBSITE_BACK_COOLDOWN_MS = 1000L
 
-    // Screen rules: how often content-changed events may trigger a tree
-    // walk, and a floor between Back presses as a backstop to the latch.
-    const val SCREEN_EVAL_THROTTLE_MS = 250L
-    const val SCREEN_BACK_COOLDOWN_MS = 1000L
+    // How often content-changed events may trigger a full evaluation. They
+    // arrive in bursts; the UI does not actually change that fast.
+    const val EVAL_THROTTLE_MS = 250L
+
+    // How long evaluations must agree that nothing is blocked before the
+    // shield comes down, when the user has not visibly navigated away.
+    const val SHIELD_CLEAR_GRACE_MS = 600L
+
+    // How long after the user asks to leave before a shield may go up
+    // again. Long enough to cover a browser's back-navigation and the URL
+    // bar catching up with it; short enough that walking straight into
+    // another blocked page is still caught.
+    const val LEAVE_SUPPRESS_MS = 1500L
 
     // How long a schedule decision is reused before the clock is read
     // again. Well under the minute at which the answer can actually

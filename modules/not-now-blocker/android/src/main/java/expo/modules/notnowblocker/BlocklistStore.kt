@@ -11,6 +11,8 @@ import org.json.JSONArray
  * Android projection (entries without an `android` key are dropped here).
  */
 data class BlockRule(
+  /** Human-readable name, shown on the shield over a blocked screen. */
+  val label: String,
   val packageName: String,
   val viewIds: List<String>,
   val contentDescriptions: List<String>,
@@ -177,6 +179,7 @@ object BlocklistStore {
       if (packageName.isEmpty()) continue
       rules.add(
         BlockRule(
+          label = entry.optString("label").ifEmpty { packageName },
           packageName = packageName,
           viewIds = android.optJSONArray("viewIds").toStringList(),
           contentDescriptions = android.optJSONArray("contentDescriptions").toStringList(),

@@ -16,14 +16,13 @@ export const BLOCKLIST: BlockRule[] = [
   // `clips_viewer_view_pager` within 0.25–0.5s of Instagram *launching*, on
   // MainTabActivity — not on a reel. Instagram keeps the Reels pager
   // inflated inside its main tab activity, so the ID resolves everywhere in
-  // the app: feed, stories, DMs. Back then fired at Instagram's task root,
-  // which exits the app rather than backing out of a screen.
+  // the app: feed, stories, DMs. The whole app got blocked on open.
   //
   // The service now additionally requires a matched node to be visible on
   // screen, which neutralises this specific failure. Re-enable only with a
   // view ID inspected on your own Instagram build (README → "Finding view
-  // IDs"), and confirm via `adb logcat -s NotNowBlocker` that it fires when
-  // you open a reel and stays quiet when you open the app.
+  // IDs"), and confirm via `adb logcat -s NotNowBlocker` that the shield
+  // goes up when you open a reel and stays down when you open the app.
   //
   // {
   //   label: 'Instagram Reels',

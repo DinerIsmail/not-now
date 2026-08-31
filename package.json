@@ -21,7 +21,8 @@
     "android:device": "expo run:android --device",
     "prebuild": "expo prebuild --platform android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "release": "node scripts/release.mjs"
   },
   "private": true
 }

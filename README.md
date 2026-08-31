@@ -20,7 +20,7 @@ modules/not-now-blocker/
   index.ts                     Public JS API (platform-neutral)
   src/                         Types + native module bindings
   android/                     Kotlin implementation (module, service,
-                               manifest, accessibility XML config)
+                               block overlay, manifest, accessibility XML)
   ios/                         Stub — future FamilyControls home
 ```
 
@@ -76,19 +76,71 @@ Blocklist edits are the nice case: the JS reload pushes the new rules into
 `SharedPreferences` and the accessibility service picks them up live — no
 rebuild, and no re-toggling the service in settings.
 
-### Getting a build onto a phone that isn't tethered
+### Releasing a new version to your phone
+
+`npm run release` builds a **signed, standalone release APK** — no Metro, no
+dev launcher, no USB, no developer mode on the phone. Add `--publish` and it
+also tags the commit and puts the APK on a GitHub Release, so installing is
+"open a link in the phone's browser and tap the download".
 
 ```sh
-cd android && ./gradlew assembleRelease     # → app/build/outputs/apk/release/
+npm run release                       # build dist/not-now-<version>.apk
+npm run release -- --publish          # ...and publish it as a GitHub Release
+npm run release -- minor --publish    # bump minor rather than patch
+npm run release -- --no-bump          # rebuild the current version
+```
+
+Then on the phone, open the URL the script prints —
+`https://github.com/<you>/not-now/releases/download/v<x.y.z>/not-now-<x.y.z>.apk`
+— tap the download, tap install. Android asks once for permission to install
+unknown apps from your browser; that's a normal per-app setting under
+**Settings → Apps → Special app access**, nothing to do with developer mode.
+
+**The first release is a fresh install, not an upgrade.** The dev build on your
+phone is signed with Android's shared debug key and this one isn't, so Android
+refuses to install over it: uninstall Not Now first, then install the release
+and re-toggle the accessibility service. Every release after that upgrades in
+place, keeping the blocklist and the accessibility toggle intact.
+
+Three pieces of state make that true, and are worth understanding before
+changing anything here:
+
+- **`release.jks` and `release-keystore.properties`** (project root, both
+  gitignored) are generated on the first run. Android only installs an update
+  over an app signed with the *same* key, so these two files are the only
+  reason a future release is an upgrade rather than an uninstall-and-start-over.
+  **Back them up off this machine** — they cannot be regenerated.
+- **`android.versionCode`** in `app.json` counts up on every release. It is what
+  Android actually compares; `version` (`1.2.3`) is only ever shown to humans.
+  It must never go backwards, so let the script own it.
+- Signing is applied by a config plugin,
+  [`plugins/withReleaseSigning.js`](plugins/withReleaseSigning.js), rather than
+  by editing `android/app/build.gradle` — `android/` is generated and
+  gitignored, so a hand-edit there is wiped by the next `expo prebuild`. With no
+  keystore present the plugin falls back to the debug key, so a fresh clone
+  still builds.
+
+`--publish` refuses to run on a dirty working tree (`--allow-dirty` overrides),
+so a published tag always corresponds to a commit. The APK is a universal build
+(~66 MB, all four ABIs); restricting `reactNativeArchitectures` to `arm64-v8a`
+would roughly halve it at the cost of x86 emulator builds — not worth it unless
+the size starts to bother you.
+
+The alternative to all of this is a hosted service: EAS Build's internal
+distribution (free tier: 15 Android builds/month, low-priority queue) or
+Firebase App Distribution. Both hand you an install page and hold the keystore
+for you; neither is faster than a local build on a machine that already has the
+Android toolchain.
+
+### Reinstalling over USB
+
+```sh
 npx expo run:android --binary path/to.apk   # install an APK you already built
 ```
 
-Send that APK however you like (the `--binary` flag also saves you a rebuild
-when you just need to reinstall). If this ever outgrows manual sharing, the
-usual next steps are Firebase App Distribution or EAS Build internal
-distribution — both give testers a link and push notifications, at the cost of
-one more service to configure. Note that `android/` is generated and
-gitignored: regenerate it with `npm run prebuild` after changing native config.
+Saves a rebuild when you just need to reinstall. Note that `android/` is
+generated and gitignored: regenerate it with `npm run prebuild` after changing
+native config.
 
 ## Layout: edge-to-edge and the keyboard
 
@@ -126,7 +178,8 @@ app (no native rebuild, no re-toggling the service).
 A rule matches when the foreground window belongs to `packageName` **and**
 the window contains any of the rule's `viewIds` (exact match) or
 `contentDescriptions` (case-insensitive substring). On match the service
-presses Back.
+puts a shield over the screen (see "How blocking behaves" below); the rule's
+`label` is what the shield says.
 
 The seeded Instagram Reels entry is a **placeholder guess** — verify the
 view ID against your installed Instagram version before trusting it.
@@ -141,7 +194,7 @@ apply immediately, no app reload needed.
 
 Two implementation notes:
 
-- Whole-app blocks send the device **Home** rather than Back: Back from
+- The shield over a blocked app offers **Home** rather than Back: Back from
   inside an app just climbs its own screen stack one blocked screen at a
   time.
 - Listing other packages on Android 11+ requires a `<queries>` declaration
@@ -161,6 +214,7 @@ bar and pressing Back when a blocked domain appears.
 
 How it works, and its limits:
 
+- A blocked page is **covered**, not closed — see "How blocking behaves".
 - Supported browsers are a hardcoded map of package name → URL-bar view ID
   (`BROWSER_URL_BARS` in `NotNowAccessibilityService.kt`): Chrome, Chrome
   Beta, Brave, Firefox, Samsung Internet. Add your browser by finding its
@@ -174,6 +228,70 @@ How it works, and its limits:
 - Not covered: in-app webviews (e.g. links opened inside Instagram),
   browsers not in the map, and anything DNS-level. This is a nudge, not a
   firewall.
+
+## How blocking behaves
+
+When the service finds blocked content it puts a **shield** over it: a
+full-screen overlay naming what is blocked, with one button to leave ("Go
+back" for a screen or a website, "Go home" for a whole app). It does not
+navigate for you.
+
+It used to. The service fired Back or Home the instant it matched, and in a
+browser that was actively wrong: Back on a blocked page in a fresh tab has
+nowhere to go, so it closed the browser. Shielding leaves you where you are
+and makes leaving your decision — the same model as an iOS Screen Time
+shield.
+
+The mechanism is `WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY`
+(`BlockOverlay.kt`), which is the one overlay type an AccessibilityService
+may post on the strength of `BIND_ACCESSIBILITY_SERVICE` alone. No
+`SYSTEM_ALERT_WINDOW`, so there is no "display over other apps" permission
+for you to grant. Four details are load-bearing:
+
+- **`FLAG_NOT_FOCUSABLE`.** Keeps the overlay out of the accessibility
+  framework's idea of the "active window", so `rootInActiveWindow` still
+  returns the app underneath and the service can keep asking whether the
+  shield is still needed. It also leaves the Back key with that app.
+  `FLAG_NOT_TOUCHABLE` is pointedly *not* set, so touches land on the shield
+  and the UI beneath it can't be tapped through.
+- **`fitInsetsTypes = systemBars()`** (API 30+). An accessibility overlay is
+  layered *above* the navigation bar, so a full-screen one can cover it — and
+  a shield that swallows the Home button leaves its own button as your only
+  way out. Insetting the window keeps the system bars usable whatever else
+  goes wrong.
+- **Views built in code, not XML.** The service has no app theme attached, so
+  an inflated layout would resolve theme attributes against nothing.
+- **A failed `addView` falls back to ejecting.** A shield that doesn't appear
+  must not silently mean "not blocked".
+
+Shielding also deleted a class of bug. Ejecting was destructive and couldn't
+be repeated, so it needed an edge-trigger latch and two cooldowns to stop it
+re-firing while a blocked screen sat in the window tree — the mechanism that
+used to close the comments sheet you'd just opened over a blocked reel.
+Showing a shield is idempotent (re-showing the same one is a no-op), so the
+service now just answers "is this blocked right now?" on every event and
+keeps the overlay in step. What remains is a 250ms throttle on
+content-changed events, and one asymmetry worth knowing about:
+
+A third timing rule exists purely to stop the shield fighting the exit it
+just offered. Leaving is not instant — a browser's URL bar still reads the
+blocked domain for a few hundred milliseconds after Back is pressed — so
+tapping the button starts a **1.5s window during which no shield may go up**.
+Without it the shield sprang back up mid-navigation, you pressed "Go back" a
+second time, and that second press (arriving once the tab had already rewound
+to a page with nothing behind it) is what closed the browser. The button also
+disables itself on first press, so a double tap can't send two Backs either.
+Both were fixed together; either one alone still leaves the other route open.
+
+> The shield goes up immediately and comes down slowly. Being late to shield
+> is the failure that matters; meanwhile "I couldn't find the URL bar in this
+> frame" and "the user has left" look identical from here, so the shield
+> waits ~600ms of agreement before dropping. The wait is skipped when the
+> foreground app changes or a window-state event says you genuinely
+> navigated, so leaving never feels sticky.
+
+One consequence to be aware of: a shielded screen is covered, not stopped. A
+blocked video behind the shield keeps playing its audio until you leave.
 
 ## Scheduling when blocking applies
 

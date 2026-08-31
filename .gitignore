@@ -42,3 +42,6 @@ yarn-error.*
 
 # local module build output (Gradle)
 modules/*/android/build/
+
+# release signing (keystore itself is covered by *.jks)
+release-keystore.properties

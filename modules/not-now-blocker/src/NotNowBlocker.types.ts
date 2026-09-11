@@ -49,6 +49,16 @@ export type InstalledApp = {
    * always absent on iOS/web, where apps can't be enumerated at all.
    */
   icon?: string;
+  /**
+   * Whether the app shipped with the device (Android `FLAG_SYSTEM` or
+   * `FLAG_UPDATED_SYSTEM_APP`). The picker hides these behind a toggle —
+   * they are overwhelmingly the Clock, the dialer and the settings app —
+   * except for the ones in `config/distracting-apps.ts`, since Chrome and
+   * YouTube are preinstalled and are worth blocking.
+   *
+   * Optional: only Android reports it.
+   */
+  isSystem?: boolean;
 };
 
 /**

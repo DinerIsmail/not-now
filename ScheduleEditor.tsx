@@ -4,13 +4,14 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
+import DateTimePicker from '@expo/ui/community/datetime-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
+  MINUTES_PER_DAY,
   isWithinSchedule,
   nextScheduleChange,
   type ScheduleWindow,
@@ -26,7 +27,7 @@ type Props = {
 /** Sunday-first, matching JS `Date#getDay` — the numbering the model uses. */
 export const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** Minutes from midnight → "09:00". 24h, because the input is 24h too. */
+/** Minutes from midnight → "09:00". 24h, matching the picker's `is24Hour`. */
 export function formatMinute(minute: number): string {
   const hours = Math.floor(minute / 60);
   const minutes = minute % 60;
@@ -45,20 +46,35 @@ export function formatDays(days: number[]): string {
 }
 
 /**
- * Accepts "9", "930", "9:30", "09:30" — all the ways someone types a time
- * into a plain text box. Returns minutes from midnight, or null.
- *
- * A text field rather than a native time picker on purpose: the picker
- * would mean a new native dependency (and so a rebuild for anyone pulling
- * this) to enter four digits.
+ * How long a window lasts, in minutes. An end at or before the start wraps
+ * past midnight, and equal times mean a full day rather than nothing — the
+ * same reading `covers` in the native module and in index.ts use.
  */
-export function parseTime(input: string): number | null {
-  const match = /^(\d{1,2})(?::?(\d{2}))?$/.exec(input.trim());
-  if (match == null) return null;
-  const hours = Number(match[1]);
-  const minutes = match[2] == null ? 0 : Number(match[2]);
-  if (hours > 23 || minutes > 59) return null;
-  return hours * 60 + minutes;
+export function windowLength(startMinute: number, endMinute: number): number {
+  if (endMinute > startMinute) return endMinute - startMinute;
+  return MINUTES_PER_DAY - startMinute + endMinute;
+}
+
+/** "8 hours", "1 hour 30 min", "45 min" — the length written out. */
+export function formatLength(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  const hourPart = hours === 1 ? '1 hour' : `${hours} hours`;
+  const minutePart = `${rest} min`;
+  if (hours === 0) return minutePart;
+  if (rest === 0) return hourPart;
+  return `${hourPart} ${minutePart}`;
+}
+
+/**
+ * The minutes-from-midnight the editor works in, as the `Date` the picker
+ * wants. Only the clock part is ever read back, so the calendar day is
+ * whatever today happens to be.
+ */
+function dateAtMinute(minute: number): Date {
+  const date = new Date();
+  date.setHours(Math.floor(minute / 60), minute % 60, 0, 0);
+  return date;
 }
 
 const DAY_PRESETS: { label: string; days: number[] }[] = [
@@ -74,13 +90,18 @@ const DAY_PRESETS: { label: string; days: number[] }[] = [
  */
 export default function ScheduleEditor({ schedule, onAdd, onRemove, onClose }: Props) {
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
-  const [from, setFrom] = useState('09:00');
-  const [to, setTo] = useState('17:00');
+  const [startMinute, setStartMinute] = useState(9 * 60);
+  const [endMinute, setEndMinute] = useState(17 * 60);
+  // Which field's picker is open, if any. The dialog opens on mount and is
+  // unmounted on confirm or cancel, so its visibility *is* this state.
+  const [picking, setPicking] = useState<'start' | 'end' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
 
   const active = isWithinSchedule(schedule);
   const nextChange = nextScheduleChange(schedule);
+  const length = windowLength(startMinute, endMinute);
+  const overnight = endMinute <= startMinute;
 
   const toggleDay = (day: number) => {
     setError(null);
@@ -92,12 +113,6 @@ export default function ScheduleEditor({ schedule, onAdd, onRemove, onClose }: P
   const add = () => {
     if (days.length === 0) {
       setError('Pick at least one day.');
-      return;
-    }
-    const startMinute = parseTime(from);
-    const endMinute = parseTime(to);
-    if (startMinute == null || endMinute == null) {
-      setError('Times must look like 09:00.');
       return;
     }
     setError(null);
@@ -170,41 +185,61 @@ export default function ScheduleEditor({ schedule, onAdd, onRemove, onClose }: P
         </View>
 
         <View style={styles.timeRow}>
-          <Text style={styles.timeLabel}>From</Text>
-          <TextInput
-            style={styles.timeInput}
-            value={from}
-            onChangeText={(text) => {
-              setFrom(text);
-              setError(null);
-            }}
-            placeholder="09:00"
-            keyboardType="numbers-and-punctuation"
-            autoCorrect={false}
-          />
-          <Text style={styles.timeLabel}>to</Text>
-          <TextInput
-            style={styles.timeInput}
-            value={to}
-            onChangeText={(text) => {
-              setTo(text);
-              setError(null);
-            }}
-            placeholder="17:00"
-            keyboardType="numbers-and-punctuation"
-            autoCorrect={false}
-          />
-          <Pressable style={styles.addButton} onPress={add}>
-            <Text style={styles.addButtonText}>Add</Text>
+          <Pressable
+            style={styles.timeField}
+            onPress={() => setPicking('start')}
+            accessibilityRole="button"
+            accessibilityLabel={`Start time, ${formatMinute(startMinute)}`}
+          >
+            <Text style={styles.timeFieldLabel}>From</Text>
+            <Text style={styles.timeFieldValue}>{formatMinute(startMinute)}</Text>
+          </Pressable>
+          <Text style={styles.timeArrow}>→</Text>
+          <Pressable
+            style={styles.timeField}
+            onPress={() => setPicking('end')}
+            accessibilityRole="button"
+            accessibilityLabel={`End time, ${formatMinute(endMinute)}`}
+          >
+            <Text style={styles.timeFieldLabel}>To</Text>
+            <Text style={styles.timeFieldValue}>{formatMinute(endMinute)}</Text>
           </Pressable>
         </View>
 
-        {error != null && <Text style={styles.error}>{error}</Text>}
+        {/*
+          The dialog opens as soon as it mounts and reports the whole time in
+          one go on OK, so there is no partial state to reconcile: mount it
+          for the field being edited, unmount it on either button.
+        */}
+        {picking != null && (
+          <DateTimePicker
+            mode="time"
+            presentation="dialog"
+            is24Hour
+            value={dateAtMinute(picking === 'start' ? startMinute : endMinute)}
+            onValueChange={(_event, date) => {
+              const minute = date.getHours() * 60 + date.getMinutes();
+              if (picking === 'start') setStartMinute(minute);
+              else setEndMinute(minute);
+              setPicking(null);
+            }}
+            onDismiss={() => setPicking(null)}
+            // The dialog is its own window; the host view itself is only an
+            // anchor, so give it a size it can't be laid out away to nothing.
+            style={{ width: 1, height: 1 }}
+          />
+        )}
 
-        <Text style={styles.hint}>
-          24-hour times. An end earlier than the start runs overnight into the
-          next morning (22:00 – 06:00), and an end of 00:00 means midnight.
+        <Text style={styles.length}>
+          {formatLength(length)}
+          {overnight ? ' · overnight into the next day' : ''}
         </Text>
+
+        <Pressable style={styles.addButton} onPress={add}>
+          <Text style={styles.addButtonText}>Add window</Text>
+        </Pressable>
+
+        {error != null && <Text style={styles.error}>{error}</Text>}
       </View>
 
       <FlatList
@@ -330,9 +365,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   form: {
-    // The form sits above the list, not below it: pinned to the bottom of
-    // the screen the software keyboard covered the inputs it was opened
-    // for. This also matches WebsiteList, where the add row is at the top.
+    // The form sits above the list, not below it, matching WebsiteList —
+    // and the schedule list is the thing you scroll, so it gets the room.
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
     padding: 16,
@@ -385,25 +419,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 2,
   },
-  timeLabel: {
-    fontSize: 14,
-    color: '#555',
-  },
-  timeInput: {
+  timeField: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#ddd',
-    fontSize: 16,
+    backgroundColor: '#fafafa',
+  },
+  timeFieldLabel: {
+    fontSize: 12,
+    color: '#888',
+  },
+  timeFieldValue: {
+    fontSize: 28,
+    fontWeight: '600',
+    // Tabular-ish alignment so the two fields don't jitter as digits change.
+    fontVariant: ['tabular-nums'],
+  },
+  timeArrow: {
+    fontSize: 18,
+    color: '#888',
+  },
+  length: {
+    color: '#888',
+    fontSize: 12,
   },
   addButton: {
     backgroundColor: '#1a1a1a',
     borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
   },
   addButtonText: {
     color: '#fff',
@@ -411,9 +460,5 @@ const styles = StyleSheet.create({
   },
   error: {
     color: '#b02a37',
-  },
-  hint: {
-    color: '#888',
-    fontSize: 12,
   },
 });

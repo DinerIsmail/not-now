@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Image,
   Pressable,
+  SectionList,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getInstalledApps, type InstalledApp } from './modules/not-now-blocker';
+import { DISTRACTING_APPS } from './config/distracting-apps';
 
 type Props = {
   blocked: string[];
@@ -20,23 +21,71 @@ type Props = {
 };
 
 /**
+ * Package name → its position in `DISTRACTING_APPS`. Doubles as the
+ * membership test ("is this one recommended?") and the sort key, so the
+ * Recommended section comes out in the curated order rather than
+ * alphabetically — the list is ordered by how distracting the app is.
+ */
+const RECOMMENDED_RANK = new Map(DISTRACTING_APPS.map((pkg, index) => [pkg, index]));
+
+/**
  * Full-screen list of launchable apps with a filter box; tapping a row
  * toggles whole-app blocking for it. Selection state lives in App.tsx.
+ *
+ * Two things shape what you see, because the raw list is ~100 apps and
+ * almost none of them are why you opened this screen:
+ * - Anything in `config/distracting-apps.ts` that's installed is lifted to
+ *   a "Recommended" section at the top.
+ * - Apps that shipped with the device are hidden behind a toggle. A
+ *   recommended app is never hidden by that rule (Chrome and YouTube are
+ *   preinstalled), and neither is an app you've already blocked (hiding it
+ *   would strand it as blocked with no way back).
  */
 export default function AppPicker({ blocked, onToggle, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [apps, setApps] = useState<InstalledApp[] | null>(null);
   const [filter, setFilter] = useState('');
+  const [showSystem, setShowSystem] = useState(false);
 
   useEffect(() => {
     getInstalledApps().then(setApps);
   }, []);
 
-  const visible = apps?.filter(
-    (app) =>
-      app.label.toLowerCase().includes(filter.toLowerCase()) ||
-      app.packageName.toLowerCase().includes(filter.toLowerCase()),
-  );
+  const { sections, hiddenCount } = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    const matches = (app: InstalledApp) =>
+      app.label.toLowerCase().includes(query) ||
+      app.packageName.toLowerCase().includes(query);
+
+    const recommended: InstalledApp[] = [];
+    const rest: InstalledApp[] = [];
+    let hidden = 0;
+
+    for (const app of apps ?? []) {
+      if (!matches(app)) continue;
+      if (RECOMMENDED_RANK.has(app.packageName)) {
+        recommended.push(app);
+      } else if (app.isSystem && !showSystem && !blocked.includes(app.packageName)) {
+        hidden++;
+      } else {
+        rest.push(app);
+      }
+    }
+
+    recommended.sort(
+      (a, b) =>
+        (RECOMMENDED_RANK.get(a.packageName) ?? 0) -
+        (RECOMMENDED_RANK.get(b.packageName) ?? 0),
+    );
+
+    return {
+      sections: [
+        { title: 'Recommended', data: recommended },
+        { title: recommended.length > 0 ? 'All other apps' : 'All apps', data: rest },
+      ].filter((section) => section.data.length > 0),
+      hiddenCount: hidden,
+    };
+  }, [apps, filter, showSystem, blocked]);
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -56,16 +105,26 @@ export default function AppPicker({ blocked, onToggle, onClose }: Props) {
         autoCapitalize="none"
       />
 
-      {visible == null ? (
+      {apps == null ? (
         <ActivityIndicator style={styles.loading} />
       ) : (
-        <FlatList
-          data={visible}
+        <SectionList
+          sections={sections}
           keyExtractor={(app) => app.packageName}
           // On the content rather than the container, so rows still scroll
           // under the translucent navigation bar instead of stopping short
           // of it — but the last row can always be scrolled clear of it.
           contentContainerStyle={{ paddingBottom: insets.bottom }}
+          renderSectionHeader={({ section }) => (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              {section.title === 'Recommended' && (
+                <Text style={styles.sectionNote}>
+                  The usual suspects
+                </Text>
+              )}
+            </View>
+          )}
           renderItem={({ item }) => {
             const isBlocked = blocked.includes(item.packageName);
             return (
@@ -91,6 +150,27 @@ export default function AppPicker({ blocked, onToggle, onClose }: Props) {
               </Pressable>
             );
           }}
+          ListEmptyComponent={
+            <Text style={styles.empty}>
+              {hiddenCount > 0
+                ? 'Nothing matches, but some built-in apps are hidden.'
+                : 'No apps match that filter.'}
+            </Text>
+          }
+          ListFooterComponent={
+            hiddenCount > 0 || showSystem ? (
+              <Pressable
+                style={styles.systemToggle}
+                onPress={() => setShowSystem((previous) => !previous)}
+              >
+                <Text style={styles.systemToggleText}>
+                  {showSystem
+                    ? 'Hide built-in apps'
+                    : `Show ${hiddenCount} built-in app${hiddenCount === 1 ? '' : 's'}`}
+                </Text>
+              </Pressable>
+            ) : null
+          }
         />
       )}
     </View>
@@ -133,6 +213,26 @@ const styles = StyleSheet.create({
   loading: {
     marginTop: 32,
   },
+  sectionHeader: {
+    // Opaque: section headers stick to the top on scroll, and a transparent
+    // one would have rows sliding visibly underneath the text.
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 6,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#555',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sectionNote: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -173,5 +273,21 @@ const styles = StyleSheet.create({
   },
   checkOff: {
     color: 'transparent',
+  },
+  empty: {
+    color: '#888',
+    marginHorizontal: 16,
+    marginTop: 16,
+  },
+  systemToggle: {
+    marginTop: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  systemToggleText: {
+    fontSize: 14,
+    color: '#0a58ca',
   },
 });

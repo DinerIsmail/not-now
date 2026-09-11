@@ -114,9 +114,14 @@ class NotNowBlockerModule : Module() {
         // user out of their own escape hatch.
         .filter { it.packageName != context.packageName }
         .map { info ->
-          buildMap {
+          buildMap<String, Any> {
             put("label", info.loadLabel(pm).toString())
             put("packageName", info.packageName)
+            // Shipped with the device, or an update to something that did.
+            // The picker hides these by default: a launcher-visible system
+            // app is the Clock or the dialer far more often than it's
+            // anything worth blocking.
+            put("isSystem", info.flags and SYSTEM_APP_FLAGS != 0)
             // Omitted rather than null when extraction fails, so the JS type
             // stays `icon?: string` and the picker falls back to an initial.
             iconUri(pm, info)?.let { put("icon", it) }
@@ -170,6 +175,11 @@ class NotNowBlockerModule : Module() {
   private companion object {
     const val TAG = "NotNowBlocker"
     const val ICON_DIR_NAME = "app-icons"
+    // FLAG_UPDATED_SYSTEM_APP as well as FLAG_SYSTEM: a preinstalled app
+    // that has since been updated from the Play Store drops neither flag,
+    // and both readings mean the same thing here — "came with the phone".
+    const val SYSTEM_APP_FLAGS =
+      ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP
     // Comfortably above the 40dp the picker renders at, even on a 3x screen.
     const val ICON_SIZE_PX = 144
   }

@@ -16,6 +16,7 @@ AppPicker.tsx                  Whole-app blocking picker
 WebsiteList.tsx                Blocked-domain list
 ScheduleEditor.tsx             When blocking applies
 config/blocklist.ts            ← THE file you edit: the blocklist (typed)
+config/distracting-apps.ts     Apps the picker recommends blocking
 modules/not-now-blocker/
   index.ts                     Public JS API (platform-neutral)
   src/                         Types + native module bindings
@@ -162,9 +163,9 @@ follow, and new screens have to keep to both:
 - Keep text inputs in the **top half** of a screen. Edge-to-edge also means
   the window no longer resizes for the software keyboard by itself, so a form
   pinned to the bottom gets covered by the very keyboard it opened — which is
-  exactly what happened to the schedule editor's time fields. Its "Add a
-  window" form sits above the list for that reason, matching the add row in
-  `WebsiteList`. The alternative is `KeyboardAvoidingView` or
+  exactly what happened to `WebsiteList`'s domain field. Its add row, and the
+  schedule editor's "Add a window" form, both sit above their list for that
+  reason. The alternative is `KeyboardAvoidingView` or
   `react-native-keyboard-controller`; laying the screen out so the problem
   can't arise is cheaper and has fewer edge cases.
 
@@ -187,12 +188,32 @@ view ID against your installed Instagram version before trusting it.
 ## Blocking whole apps
 
 Besides per-screen rules, the app has a picker (**Choose apps to block** on
-the main screen) that lists every launchable app on the device; ticked apps
+the main screen) that lists the launchable apps on the device; ticked apps
 are blocked entirely. Selections are stored natively (SharedPreferences,
 separate key from the screen rules — the two never overwrite each other) and
 apply immediately, no app reload needed.
 
-Two implementation notes:
+The raw list runs to ~100 apps on a normal phone, and almost none of them are
+why you opened the screen, so it is shaped twice before you see it:
+
+- **Recommended** at the top lists whichever of
+  [`config/distracting-apps.ts`](config/distracting-apps.ts) are actually
+  installed, in the order written there (most distracting first) rather than
+  alphabetically. That file is a plain array of package names — edit it and
+  reload, no rebuild.
+- Apps that **shipped with the device** are hidden behind a *Show N built-in
+  apps* toggle at the bottom. Clock, Calendar, the dialer and Settings are
+  not what anyone is here to block. Two exceptions are never hidden:
+  anything in `distracting-apps.ts` (Chrome and YouTube are preinstalled and
+  very much worth blocking), and anything you have already blocked — hiding
+  that would strand it as blocked with no row left to untick.
+
+"Shipped with the device" is `FLAG_SYSTEM or FLAG_UPDATED_SYSTEM_APP` from
+`ApplicationInfo`, surfaced as `InstalledApp.isSystem`. The second flag
+matters: a preinstalled app that has since been updated from the Play Store
+keeps it, and both readings mean the same thing here.
+
+Three implementation notes:
 
 - The shield over a blocked app offers **Home** rather than Back: Back from
   inside an app just climbs its own screen stack one blocked screen at a
@@ -308,9 +329,14 @@ schedule", and tells you when blocking next resumes.
 
 Reading the times:
 
-- 24-hour clock, typed as text (`9`, `930`, `9:30` and `09:30` all work).
-  A native time picker would mean a new native dependency, and so a rebuild,
-  to enter four digits.
+- Tap **From** or **To** to open Android's Material 3 time picker — the
+  system clock dial, with its own keyboard-entry toggle. It comes from
+  `@expo/ui` (`@expo/ui/community/datetime-picker`, `mode="time"`,
+  `presentation="dialog"`), which renders Jetpack Compose directly, so it is
+  a native dependency: pulling this change needs one `npm run android`.
+- 24-hour clock throughout, matching the picker's `is24Hour`. The form shows
+  the window's length under the two fields, so an accidental 16-hour window
+  is visible before you add it.
 - An end **earlier than** the start runs overnight into the next morning:
   `22:00 – 06:00` on Fridays is Friday night through Saturday morning. A
   window is anchored to the day it *starts* on.

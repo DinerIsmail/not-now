@@ -80,14 +80,14 @@ rebuild, and no re-toggling the service in settings.
 ### Releasing a new version to your phone
 
 `npm run release` builds a **signed, standalone release APK** — no Metro, no
-dev launcher, no USB, no developer mode on the phone. Add `--publish` and it
+dev launcher, no USB, no developer mode on the phone. `npm run release:publish`
 also tags the commit and puts the APK on a GitHub Release, so installing is
 "open a link in the phone's browser and tap the download".
 
 ```sh
 npm run release                       # build dist/not-now-<version>.apk
-npm run release -- --publish          # ...and publish it as a GitHub Release
-npm run release -- minor --publish    # bump minor rather than patch
+npm run release:publish               # ...and publish it as a GitHub Release
+npm run release:publish -- minor      # bump minor rather than patch
 npm run release -- --no-bump          # rebuild the current version
 ```
 
